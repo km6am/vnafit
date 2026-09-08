@@ -1,0 +1,12 @@
+* series-resonant traps to ground: a notch at 146 MHz on a through line
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+L1 p1 t1 100n
+C1 t1 0 11.88p
+Lser p1 n1 220n
+L2 n1 t2 100n
+C2 t2 0 11.88p
+Lout n1 p2 220n
+.ac lin 401 50Meg 300Meg
+.end

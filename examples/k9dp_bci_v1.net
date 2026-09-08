@@ -1,0 +1,54 @@
+K9DP QRP BCI filter, version 1 (332/102, 24 turns)
+*
+* An AM-broadcast rejection filter for QRP HF rigs: 5-element high-pass,
+* 50 ohm, series capacitors with shunt inductors to ground.
+*
+*   p1 --C1-- a --C2-- b --C3-- p2
+*             |        |
+*             L1       L2
+*             |        |
+*            gnd      gnd
+*
+* WHERE THESE NUMBERS COME FROM, because it matters which are printed on the
+* part and which are reverse-engineered:
+*
+*   MEASURED/PRINTED (k9dp.com build instructions): C1 = C3 = 3300 pF ("332"),
+*   C2 = 1000 pF ("102"), two toroids at 24 turns, 50 ohm, C0G caps,
+*   "Micrometals toroids", "blocks everything below about 3 MHz".
+*
+*   INFERRED: the topology and the prototype.  The kit lists 3 caps and 2
+*   toroids, which is a 5-element ladder, and for a high-pass the caps are the
+*   series arms.  The prototype follows from the capacitor RATIO alone:
+*   3300/1000 = 3.30, against g3/g1 = 3.236 for a 5-pole Butterworth (the
+*   Chebyshevs are 1.4-1.7 and do not fit).  Running that backwards gives
+*   fc = 1.561 MHz and predicts C2 = 1020 pF, against 1000 pF printed -- a 2%
+*   miss, i.e. the nearest E-series value.  Good agreement, but still an
+*   inference from two numbers; a measured sweep would settle it.
+*
+*   ASSUMED: the core.  No source states it.  al below is the only free
+*   parameter of consequence -- see k9dp_bci_v2.net for why 5.2 nH/N^2.
+*
+.param fc=1.561Meg
+.param al=5.2n            ; nH per turn^2 -- ASSUMED, this is the one to fit
+.param turns=24
+.param lsh={al*turns*turns}
+.param qL=180             ; iron-powder mix 2 at HF; assumed, barely matters
+                          ; above fc and matters only for passband ripple
+
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+
+C1 p1 a  3300p
+L1 a  0  {lsh} Q={qL}
+C2 a  b  1000p
+L2 b  0  {lsh} Q={qL}
+C3 b  p2 3300p
+
+.ac dec 601 300k 60Meg
+
+* If you sweep a real one, these are the parameters worth turning loose.  al is
+* the interesting one: it is the core's inductance factor, so fitting it
+* identifies the toroid.  The capacitors are printed on the part -- do not fit
+* them just because you can.
+.fit al    5.2n  2.5n  9n
+.fit qL    180   30    2000

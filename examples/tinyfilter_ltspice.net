@@ -1,0 +1,25 @@
+* N6ARA TinyFilter, 2 m
+* Exported by vnafit.  Ports are modelled the SPICE way:
+*   V1 drives port 1 through Rsrc = 50 ohm
+*   Rload = 50 ohm terminates port 2
+* With equal port impedances, S21 = 2*V(p2) and S11 = 2*V(p1) - 1
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+* Q exported as a series resistance at f_ref = 146.0000 MHz.  That is a constant R standing in for
+* a constant Q: exact at f_ref, drifting either side of it.
+Cin p1 n1 6.27e-12
+L1 n1 l1_q 3e-08
+RL1 l1_q 0 0.138992  ; vnafit Q=198 at f_ref
+C1 n1 0 3.204e-11
+Cm1 n1 n2 1.78e-12
+L2 n2 l2_q 3e-08
+RL2 l2_q 0 0.138992  ; vnafit Q=198 at f_ref
+C2 n2 0 3.606e-11
+Cm2 n2 n3 1.78e-12
+L3 n3 l3_q 3e-08
+RL3 l3_q 0 0.138992  ; vnafit Q=198 at f_ref
+C3 n3 0 3.204e-11
+Cout p2 n3 6.27e-12
+.ac lin 401 125000000 180000000
+.end

@@ -1,0 +1,45 @@
+#!/bin/sh
+# Launch with an interpreter that actually has the dependencies.
+#   ./run                     -> the GUI
+#   ./run -m vnafit.cli ...   -> the headless CLI
+#   ./run somescript.py ...   -> any script in this repo
+#
+# Prefers the `vnafit` conda env
+# wherever conda happens to live, then whatever else can import everything.
+# It never assumes the shell's default python.  A login shell that activates a
+# conda environment leaves `python` as whatever that env holds -- which may be
+# Python 2 -- and a Homebrew `python3` often has no _tkinter at all.
+here=$(cd "$(dirname "$0")" && pwd)
+ENVNAME=vnafit
+target=""
+case "$1" in
+    -m) mode_m=1; shift; target=$1; shift ;;
+    *.py) target=$1; shift ;;
+    *) target="-m vnafit.gui" ;;
+esac
+[ -n "$mode_m" ] && target="-m $target"
+case "$target" in -m*) : ;; *) target="$here/$target" ;; esac
+
+CANDS=""
+for root in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" \
+            "$HOME/opt/miniconda3" "$HOME/opt/anaconda3" /opt/conda /usr/local/miniconda3; do
+    CANDS="$CANDS $root/envs/$ENVNAME/bin/python"
+done
+[ -x "$here/.venv/bin/python" ] && CANDS="$CANDS $here/.venv/bin/python"
+[ -n "$CONDA_PREFIX" ] && CANDS="$CANDS $CONDA_PREFIX/bin/python"
+CANDS="$CANDS $(command -v python3 2>/dev/null) $(command -v python 2>/dev/null)"
+for P in $CANDS; do
+    [ -x "$P" ] || continue
+    # The version gate is not paranoia: Anaconda's py27 env imports numpy,
+    # scipy, matplotlib, serial AND tkinter quite happily, so an imports-only
+    # check can select Python 2.7 on such a system.
+    "$P" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 || continue
+    "$P" -c 'import numpy,scipy,matplotlib,serial,tkinter' >/dev/null 2>&1 || continue
+    exec env PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" "$P" $target "$@"
+done
+cat >&2 <<MSG
+No Python >= 3.10 found with numpy, scipy, matplotlib, pyserial and tkinter.
+Run the bootstrap, which creates one:
+    $here/bootstrap
+MSG
+exit 1

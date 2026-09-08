@@ -1,0 +1,40 @@
+2-section helical, 2 m band
+* NOTE: both resonators are written in terms of one f0, so this model is
+* symmetric by construction and cannot represent a detuned pair.  Use
+* helical_2m_asym.net when you care about the detune -- which, while tuning, is
+* most of the time.
+*
+* Topology: two parallel L||C resonators, magnetically coupled through the
+* aperture, each fed by a tap on the coil.  The tap is modelled as an ideal
+* autotransformer, which is exactly why L below is a GAUGE and not a
+* measurement -- see README, "What the model can and cannot tell you".
+.param f0=145.4Meg  L=330n  qu=670  k=0.0121  qe=46
+
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+
+X1 p1 0 n1 0 n={sqrt(50/(2*pi*f0*L*qe))}
+L1 n1 0 {L} Q={qu}
+C1 n1 0 {1/(4*pi*pi*f0*f0*L)}
+
+L2 n2 0 {L} Q={qu}
+C2 n2 0 {1/(4*pi*pi*f0*f0*L)}
+K1 L1 L2 {k}
+X2 p2 0 n2 0 n={sqrt(50/(2*pi*f0*L*qe))}
+
+.ac lin 401 95.4Meg 195.4Meg
+
+* Turn these loose with `vnafit fit`.
+.fit k  0.015 0.002 0.1
+.fit qe 60    10    400
+.fit f0 145Meg 140Meg 150Meg
+
+* L is NOT fitted, and that is the point rather than an oversight.  With the
+* ports tapped, every impedance in this circuit scales together, so raising L
+* and lowering C at fixed f0/k/qe/Qu changes |S21| by about 1e-11 dB -- L is an
+* exact gauge freedom and the data cannot see it.  Uncomment the line below and
+* the fit will slide along that flat direction until it hits a rail; the tool
+* will say AT BOUND and refuse to quote an uncertainty, which is correct, but
+* the right answer is not to declare it free in the first place.
+* Gauge-fix hard.  See tests/test_identifiability.py.
+*.fit L  900n  30n   9u

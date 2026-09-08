@@ -1,0 +1,23 @@
+Never-seen 5-pole capacitively coupled test filter
+.param L=68n  qu=150
+.param cm=1.2p
+.param cin=5.0p
+.param c1=20p
+.param c2=22p
+.param c3=20p
+.param al=3.5n
+.param turns=4
+.param lsh={al*turns*turns}
+Cin p1 n1 {cin}
+L1  n1 0 {L} Q={qu}
+C1  n1 0 {c1}
+Cm1 n1 n2 {cm}
+L2  n2 0 {lsh} Q={qu}
+C2  n2 0 {c2}
+Cm2 n2 n3 {cm}
+L3  n3 0 {L} Q={qu}
+C3  n3 0 {c3}
+Cout n3 p2 {cin}
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+.ac lin 401 60meg 300meg

@@ -1,0 +1,89 @@
+#!/bin/sh
+# Create an environment vnafit can actually run in, on any machine.
+#
+#   ./bootstrap            create it (conda if available, else a venv)
+#   ./bootstrap --venv     force the venv path
+#   ./bootstrap --check    only report what is usable, create nothing
+#
+# Two paths, because tkinter is not pip-installable:
+#   conda  -- preferred; ships tkinter on macOS, Linux and Windows.
+#   venv   -- only works if the base interpreter already has _tkinter.
+#             A python.org build does; `brew install python-tk` adds it to a
+#             Homebrew python; a bare Homebrew python3 does NOT.
+here=$(cd "$(dirname "$0")" && pwd)
+ENVNAME=vnafit
+NEEDS='numpy,scipy,matplotlib,serial,tkinter'
+
+usable() {   # usable <python> -> 0 if it is >=3.10 and imports everything
+    [ -x "$1" ] || return 1
+    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1 || return 1
+    "$1" -c "import $NEEDS" >/dev/null 2>&1
+}
+
+report() {
+    for P in "$@"; do
+        [ -x "$P" ] || continue
+        v=$("$P" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null) || continue
+        miss=""
+        for m in numpy scipy matplotlib serial tkinter; do
+            "$P" -c "import $m" >/dev/null 2>&1 || miss="$miss $m"
+        done
+        [ -z "$miss" ] && miss=" -" 
+        printf '  %-58s py%-5s missing:%s\n' "$P" "$v" "$miss"
+    done
+}
+
+conda_root=""
+for root in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" \
+            "$HOME/opt/miniconda3" "$HOME/opt/anaconda3" /opt/conda /usr/local/miniconda3; do
+    [ -x "$root/bin/conda" ] && { conda_root=$root; break; }
+done
+
+if [ "$1" = "--check" ]; then
+    echo "Interpreters seen:"
+    report "$conda_root/envs/$ENVNAME/bin/python" "$here/.venv/bin/python" \
+           "$CONDA_PREFIX/bin/python" "$(command -v python3)" "$(command -v python)"
+    echo
+    if usable "$conda_root/envs/$ENVNAME/bin/python" || usable "$here/.venv/bin/python"; then
+        echo "OK - ./run will work."
+    else
+        echo "Nothing usable yet - run ./bootstrap"
+    fi
+    exit 0
+fi
+
+if [ "$1" != "--venv" ] && [ -n "$conda_root" ]; then
+    P="$conda_root/envs/$ENVNAME/bin/python"
+    if usable "$P"; then echo "conda env '$ENVNAME' already usable: $P"; exit 0; fi
+    echo "Creating conda env '$ENVNAME' from environment.yml ..."
+    "$conda_root/bin/conda" env create -f "$here/environment.yml" -q || {
+        echo "conda env create failed; retrying as an update ..." >&2
+        "$conda_root/bin/conda" env update -f "$here/environment.yml" -q || exit 1; }
+    usable "$P" || { echo "created, but $P still cannot import $NEEDS" >&2; exit 1; }
+    echo "OK: $P"
+    exec "$P" -m pip install -q -e "$here"
+fi
+
+# venv path
+BASE=""
+for P in "$(command -v python3.12)" "$(command -v python3.11)" "$(command -v python3)"; do
+    [ -x "$P" ] || continue
+    "$P" -c 'import sys,tkinter; sys.exit(0 if sys.version_info>=(3,10) else 1)' >/dev/null 2>&1 \
+        && { BASE=$P; break; }
+done
+if [ -z "$BASE" ]; then
+    cat >&2 <<MSG
+No base interpreter with tkinter was found, so the venv path cannot work.
+tkinter is not pip-installable.  Either:
+  install conda (miniforge) and re-run ./bootstrap        <- recommended
+  or on macOS:   brew install python-tk
+  or install a python.org build, which bundles Tk.
+MSG
+    exit 1
+fi
+echo "Creating venv at $here/.venv from $BASE ..."
+"$BASE" -m venv "$here/.venv" || exit 1
+"$here/.venv/bin/python" -m pip install -q --upgrade pip
+"$here/.venv/bin/python" -m pip install -q -e "$here" || exit 1
+usable "$here/.venv/bin/python" || { echo "venv created but incomplete" >&2; exit 1; }
+echo "OK: $here/.venv/bin/python"

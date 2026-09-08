@@ -1,0 +1,25 @@
+2-section helical, per-resonator tuning
+* Each resonator gets its OWN f0 and its OWN tap, because that is what the
+* bench can actually change independently: two tuning screws and two taps.
+*
+* helical_2m.net writes both resonator capacitors in terms of a single f0, so
+* it is SYMMETRIC BY CONSTRUCTION -- there is no parameter that could make one
+* resonator differ from the other, and no fit of it can ever report a detune.
+* That made it strictly less expressive than the coupling-matrix model it was
+* meant to supersede, which fits f0 as a vector.  Hence this file.
+*
+* With f01 and f02 free, `vnafit card` says all six parameters are determinable,
+* and at 0.007 dB trace noise the detune f01-f02 is knowable to about 20 kHz --
+* comfortably finer than the +-20 kHz the bench procedure asks you to tune to.
+.param f01=145.4Meg  f02=145.4Meg  L=330n  qu=670  k=0.0121
+.param qe1=46  qe2=46
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+X1 p1 0 n1 0 n={sqrt(50/(2*pi*f01*L*qe1))}
+L1 n1 0 {L} Q={qu}
+C1 n1 0 {1/(4*pi*pi*f01*f01*L)}
+L2 n2 0 {L} Q={qu}
+C2 n2 0 {1/(4*pi*pi*f02*f02*L)}
+K1 L1 L2 {k}
+X2 p2 0 n2 0 n={sqrt(50/(2*pi*f02*L*qe2))}
+.ac lin 401 135.4Meg 155.4Meg

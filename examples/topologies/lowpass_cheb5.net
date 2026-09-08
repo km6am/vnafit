@@ -1,0 +1,11 @@
+* 5-pole 0.1 dB Chebyshev lowpass, 30 MHz, 50 ohm (LTspice export)
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+L1 p1 n1 304.2n
+C2 n1 0 145.5p
+L3 n1 n2 523.9n
+C4 n2 0 145.5p
+L5 n2 p2 304.2n
+.ac lin 401 1Meg 120Meg
+.end

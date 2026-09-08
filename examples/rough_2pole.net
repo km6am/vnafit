@@ -1,0 +1,20 @@
+Rough 2-pole guess
+* Deliberately NOT matched to any particular filter.  Round numbers, one
+* significant figure of thought.  This is what a model normally looks like when
+* you sit down: the topology is right, the values are a guess.
+*
+* Two tapped resonators, magnetically coupled -- the helical arrangement.
+.param f0=146Meg  L=330n  qu=800  k=0.015  qe=100
+
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+
+X1 p1 0 n1 0 n={sqrt(50/(2*pi*f0*L*qe))}
+L1 n1 0 {L} Q={qu}
+C1 n1 0 {1/(4*pi*pi*f0*f0*L)}
+L2 n2 0 {L} Q={qu}
+C2 n2 0 {1/(4*pi*pi*f0*f0*L)}
+K1 L1 L2 {k}
+X2 p2 0 n2 0 n={sqrt(50/(2*pi*f0*L*qe))}
+
+.ac lin 401 120Meg 175Meg

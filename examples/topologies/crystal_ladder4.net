@@ -1,0 +1,14 @@
+* 4-pole crystal (mesh) ladder at 10 MHz -- series LC arms, shunt coupling
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+Lm1 p1 a1 1m
+Cm1 a1 n1 0.2533p
+Cc1 n1 0 120p
+Lm2 n1 a2 1m
+Cm2 a2 n2 0.2533p
+Cc2 n2 0 120p
+Lm3 n2 a3 1m
+Cm3 a3 p2 0.2533p
+.ac lin 601 9.97Meg 10.03Meg
+.end

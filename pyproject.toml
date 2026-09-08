@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vnafit"
+version = "0.1.0"
+description = "Netlist-model filter measurement, tuning and fitting against a NanoVNA"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Badgie Miller, KM6AM" }]
+keywords = ["rf", "filter", "vna", "nanovna", "s-parameters", "touchstone",
+            "amateur-radio", "spice", "curve-fitting", "identifiability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Communications :: Ham Radio",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "scikit-rf>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/KM6AM/vnafit"
+Issues = "https://github.com/KM6AM/vnafit/issues"
+
+[project.scripts]
+vnafit = "vnafit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vnafit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

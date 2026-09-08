@@ -1,0 +1,7 @@
+# Runtime deps for the pip/venv path.  See environment.yml for the conda path,
+# and note that tkinter is not installable from here -- the interpreter must
+# already provide it.
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+pyserial>=3.5

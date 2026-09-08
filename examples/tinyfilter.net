@@ -1,0 +1,55 @@
+N6ARA TinyFilter, 2 m
+* 3-pole 0.25 dB Chebyshev, 144-148 MHz.  Three shunt L||C sections, two series
+* coupling caps, two series end caps.  From "TinyFilter, Description, Design and
+* Theory of Operation", Mike K6STR, rev 04/29/2026.
+*
+*        Cin      Cm1      Cm2      Cout
+*   p1 --||-- n1 --||-- n2 --||-- n3 --||-- p2
+*             |         |         |
+*           L1|C1     L2|C2     L3|C3
+*             |         |         |
+*            gnd       gnd       gnd
+*
+* EVERY VALUE HERE IS READ OFF FIGURE 3a OF THE NOTE, "Schematic with final
+* component values".  Nothing is derived and nothing is assumed:
+*
+*   L1 = L2 = L3   30 nH
+*   C1  (end)      6.27 pF        <- Figure 3a "C1" and "C10"
+*   C4  (coupling) 1.78 pF        <- Figure 3a "C4" and "C7"
+*   node 1, 3      32.04 pF       <- Figure 3a "C2+C3", "C8+C9"
+*   node 2         36.06 pF       <- Figure 3a "C5+C6"
+*
+* An earlier version of this file DERIVED these from an assumed 4 MHz ripple
+* bandwidth and got the coupling half right: cm 0.8877 pF against the note's
+* 1.78, and a model 4.65 MHz wide against a design that is 9.75.  The 4 MHz was
+* inferred from the note's "~3 dB insertion loss", which is circular -- the loss
+* is set mostly by unloaded Q, not by bandwidth -- and it was then asserted in a
+* test as though the note had stated it.  The note's own ripple bandwidth is
+* 9.0 MHz, and Figure 2b shows a flat top from
+* about 141 to 150 MHz.  Read the figure; do not re-derive the design.
+*
+* Qu = 198 is NOT from the note.  It is the value that made an earlier derived
+* model produce the note's ~3 dB loss, and the measurement says it is wrong:
+* fitting Qu against a real unit with these values gives 113.
+.param L=30n  qu=198
+.param cm=1.78p              ; coupling caps  -- FIXED parts, build check only
+.param cin=6.27p             ; end caps       -- FIXED parts, build check only
+.param c1=32.04p             ; trimmer 1      -- these three are what you turn
+.param c2=36.06p             ; trimmer 2
+.param c3=32.04p             ; trimmer 3
+
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+
+Cin  p1 n1 {cin}
+L1   n1 0  {L} Q={qu}
+C1   n1 0  {c1}
+Cm1  n1 n2 {cm}
+L2   n2 0  {L} Q={qu}
+C2   n2 0  {c2}
+Cm2  n2 n3 {cm}
+L3   n3 0  {L} Q={qu}
+C3   n3 0  {c3}
+Cout p2 n3 {cin}
+
+.ac lin 601 80Meg 300Meg

@@ -1,0 +1,52 @@
+K9DP QRP BCI filter, version 2 (821/471, 18 turns)
+*
+* Same 5-element high-pass topology as version 1, different prototype.  The kit
+* page says v2 has "much higher AM band rejection"; this model says why.
+*
+*   p1 --C1-- a --C2-- b --C3-- p2
+*             |        |
+*             L1       L2
+*             |        |
+*            gnd      gnd
+*
+* PRINTED: C1 = C3 = 820 pF ("821"), C2 = 470 pF ("471"), 18 turns.
+*
+* INFERRED: 820/470 = 1.745, against g3/g1 = 1.722 for a 5-pole 0.1 dB
+* Chebyshev -- not the Butterworth that fits v1.  So the redesign changed the
+* prototype, not just the cutoff.  Backing that out gives fc = 3.385 MHz and
+* predicts C2 = 476 pF against 470 printed (1.3%).
+*
+* THE CROSS-CHECK THAT MAKES THE CORE CREDIBLE.  Neither kit states the toroid.
+* But each version independently implies the inductance its shunt arms need,
+* and dividing by turns^2 gives the core's inductance factor:
+*
+*     v1   3.151 uH / 24^2  =  5.47 nH/N^2
+*     v2   1.715 uH / 18^2  =  5.29 nH/N^2
+*
+* Two different prototypes, two different turn counts, and they agree to 3%.
+* That is a real cross-check rather than a restatement: it says both versions
+* use the SAME core, and pins its A_L near 5.3-5.5 nH/N^2.  Micrometals T44-2
+* is 5.2 and T68-2 is 5.7; T50-2 (4.9) fits less well.  A T68 is large for a
+* 3-inch 20 g inline filter, so T44-2 is the best single guess -- but this is
+* an inference from two data points, not a measurement, and a swept unit would
+* settle it in one shot.
+*
+.param fc=3.385Meg
+.param al=5.2n            ; ASSUMED -- fit this against a real sweep
+.param turns=18
+.param lsh={al*turns*turns}
+.param qL=180
+
+.port 1 p1 0 Z0=50
+.port 2 p2 0 Z0=50
+
+C1 p1 a  820p
+L1 a  0  {lsh} Q={qL}
+C2 a  b  470p
+L2 b  0  {lsh} Q={qL}
+C3 b  p2 820p
+
+.ac dec 601 300k 60Meg
+
+.fit al    5.2n  2.5n  9n
+.fit qL    180   30    2000

@@ -1,0 +1,13 @@
+* elliptic lowpass: a capacitor across each series arm puts a zero above fc
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+C1 p1 0 120p
+L2 p1 n1 340n
+Cb2 p1 n1 33p
+C3 n1 0 210p
+L4 n1 p2 340n
+Cb4 n1 p2 33p
+C5 p2 0 120p
+.ac lin 401 1Meg 120Meg
+.end

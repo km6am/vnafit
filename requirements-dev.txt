@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest>=8.0
+# Optional cross-check backends.  Neither is required to run or test vnafit;
+# the tests that use them skip when they are absent.
+#   scikit-rf   -- independent S-parameter maths
+#   (ngspice is a native binary, not a pip package: `brew install ngspice`)
+scikit-rf>=1.0

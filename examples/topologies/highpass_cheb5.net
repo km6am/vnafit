@@ -1,0 +1,11 @@
+* 5-pole 0.1 dB Chebyshev highpass, 30 MHz, 50 ohm
+V1 vsrc 0 AC 1
+Rsrc vsrc p1 50
+Rload p2 0 50
+C1 p1 n1 92.5p
+L2 n1 0 193.4n
+C3 n1 n2 53.7p
+L4 n2 0 193.4n
+C5 n2 p2 92.5p
+.ac lin 401 5Meg 200Meg
+.end

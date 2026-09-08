@@ -1,0 +1,19 @@
+# Primary, system-independent environment for vnafit.
+#
+#   conda env create -f environment.yml
+#   conda activate vnafit
+#
+# conda is the primary path deliberately: the GUI is tkinter, and tkinter is NOT
+# pip-installable.  conda ships it on macOS, Linux and Windows alike.  A pip/venv
+# install (see pyproject.toml) works only on an interpreter that already has
+# _tkinter -- python.org builds and `brew install python-tk` do, a bare Homebrew
+# python3 does not.
+name: vnafit
+channels: [conda-forge]
+dependencies:
+  - python=3.12
+  - numpy>=1.26
+  - scipy>=1.11
+  - matplotlib>=3.8
+  - pyserial>=3.5
+  - pytest>=8.0

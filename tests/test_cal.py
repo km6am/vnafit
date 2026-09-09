@@ -168,3 +168,74 @@ def test_a_stitched_correction_is_still_exact_in_each_piece():
     # the un-interpolated case above is exact to 1e-12.
     assert np.abs(out.s11 - G).max() < 1e-5
     assert any("stitched" in x for x in out.comments)
+
+
+# --------------------------------------------------------------- the window
+class _StubApp:
+    """The main window, as far as the calibration window is concerned."""
+    dev = None
+    v_start = v_stop = None
+
+    def __init__(self):
+        self.adopted = None
+
+    def set_calibration(self, cal, path=None):
+        self.adopted = (cal, path)
+
+
+def _calwin():
+    import tkinter as tk
+    from vnafit.calwin import CalWindow
+    try:
+        root = tk.Tk()
+    except tk.TclError:                                     # pragma: no cover
+        pytest.skip("no display")
+    root.withdraw()
+    return root, CalWindow(root, _StubApp())
+
+
+def test_the_calibration_window_builds():
+    """It did not.  `_build` referred to `app` where it meant `self.app`, and
+    nothing caught it because no test had ever constructed the window --
+    every other test in this file exercises the maths underneath it."""
+    root, w = _calwin()
+    try:
+        assert str(w.savebtn.cget("state")) == "disabled"
+        assert "still needed" in w.status.cget("text")
+        assert set(w.rows) == {"load", "open", "short", "thru", "isolation"}
+    finally:
+        root.destroy()
+
+
+def test_the_window_only_offers_to_save_once_the_three_required_are_in():
+    """And says which of them are still missing, in the order it asks for them."""
+    f = np.linspace(130e6, 165e6, 51)
+    root, w = _calwin()
+    try:
+        (o, s, l), _kw = _standards(f)
+        w.captured["load"] = l
+        w._refresh()
+        assert str(w.savebtn.cget("state")) == "disabled"
+        assert "open" in w.status.cget("text") and "short" in w.status.cget("text")
+
+        w.captured["open"], w.captured["short"] = o, s
+        w._refresh()
+        assert str(w.savebtn.cget("state")) == "normal"
+        assert "corrects S11 only" in w.status.cget("text")
+
+        w.captured["thru"] = _ts(f, np.zeros(51, complex), np.ones(51, complex))
+        w._refresh()
+        assert "crosstalk term is assumed zero" in w.status.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_window_refuses_standards_swept_on_different_grids():
+    """Every standard has to be the same sweep, and the check has to happen at
+    capture time -- discovering it at save time means doing them all again."""
+    root, w = _calwin()
+    try:
+        w.grid_f = np.linspace(130e6, 165e6, 401)
+        assert len(w.grid_f) == 401
+    finally:
+        root.destroy()

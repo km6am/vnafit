@@ -61,10 +61,14 @@ class CalWindow(tk.Toplevel):
         span.pack(fill="x")
         # Default to the span the main window is already sweeping: a cal that
         # does not cover the measurement is the commonest way to get one wrong.
-        self.v_start = tk.StringVar(value=getattr(app, "v_start", None)
-                                    and app.v_start.get() or "130")
-        self.v_stop = tk.StringVar(value=getattr(app, "v_stop", None)
-                                   and app.v_stop.get() or "165")
+        def inherited(name, fallback):
+            v = getattr(self.app, name, None)
+            try:
+                return v.get() or fallback
+            except Exception:                               # noqa: BLE001
+                return fallback
+        self.v_start = tk.StringVar(value=inherited("v_start", "130"))
+        self.v_stop = tk.StringVar(value=inherited("v_stop", "165"))
         self.v_points = tk.StringVar(value="401")
         for lab, var, w in (("start MHz", self.v_start, 9),
                             ("stop", self.v_stop, 9), ("points", self.v_points, 6)):

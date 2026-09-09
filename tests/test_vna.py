@@ -233,7 +233,7 @@ class FakeSerial:
     CALSTAT_APPLY, which is the bit printed as `cal'ed`.
     """
 
-    FULL = "load open short thru isoln Es Er Et"
+    FULL = "load isoln Es Er Et"        # as a real H4 answers
 
     def __init__(self, enabled=True, calibrated=True, understands=True):
         self.enabled, self.understands = enabled, understands
@@ -306,8 +306,11 @@ def test_the_status_reply_is_parsed_the_way_the_firmware_writes_it():
     d = _dev(enabled=True, calibrated=True)
     st = d.cal_status()
     assert st["enabled"] is True
-    assert st["standards"] == ("load", "open", "short", "thru", "isoln")
-    assert st["terms"] == ("Es", "Er", "Et")
+    # CALSTAT_ED is CALSTAT_LOAD and CALSTAT_EX is CALSTAT_ISOLN -- the same
+    # bits -- so in a finished calibration those two words mean the ED and EX
+    # TERMS exist.  A real H4 answers "load isoln Es Er Et cal'ed".
+    assert set(st["terms"]) == {"ED", "EX", "ES", "ER", "ET"}
+    assert st["complete"] is True
 
     d.ser.enabled = False
     assert d.cal_status()["enabled"] is False
@@ -320,7 +323,7 @@ def test_an_empty_reply_means_uncalibrated_not_unknown():
     d = _dev(calibrated=False)
     st = d.cal_status()
     assert st["enabled"] is False
-    assert st["standards"] == () and st["terms"] == ()
+    assert st["terms"] == () and st["complete"] is False
 
 
 def test_switching_on_without_a_calibration_says_why():

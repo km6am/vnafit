@@ -440,6 +440,77 @@ def cmd_card(args):
     print(f"\nwrote {args.out}")
 
 
+def _cal_load(paths):
+    from .cal import Calibration
+    return [Calibration.load(p) for p in paths]
+
+
+def cmd_cal(args):
+    from .cal import Calibration, CalBank
+    from . import touchstone as TS
+
+    if args.what == "show":
+        for p in args.files:
+            c = Calibration.load(p)
+            print(f"=== {os.path.basename(p)}")
+            print("  " + c.describe().replace("\n", "\n  "))
+            if c.standards:
+                try:
+                    again = c.rederive()
+                    d = max(float(np.abs(again.terms[k] - c.terms[k]).max())
+                            for k in c.terms if k in again.terms)
+                    print(f"  re-derived from the embedded standards: "
+                          f"terms agree to {d:.2e}")
+                except Exception as e:                      # noqa: BLE001
+                    print(f"  re-derivation FAILED: {e}")
+        return 0
+
+    if args.what == "build":
+        cal = Calibration.from_standards(
+            TS.load(args.open), TS.load(args.short), TS.load(args.load),
+            thru=TS.load(args.thru) if args.thru else None,
+            isoln=TS.load(args.isolation) if args.isolation else None,
+            notes=args.notes or "")
+        cal.save(args.out)
+        print(cal.describe())
+        print(f"\nwrote {args.out}")
+        return 0
+
+    if args.what == "from-slot":
+        from .vna import NanoVNA
+        with NanoVNA(args.port) as dev:
+            cal = Calibration.from_instrument(dev, slot=args.slot,
+                                              notes=args.notes or "")
+        cal.save(args.out)
+        print(cal.describe())
+        print("\nNOTE: the instrument does not report the frequency grid its "
+              "calibration was taken on, so this file records point INDEX, not "
+              "hertz.  It is an archive of the numbers, not something that can "
+              "be applied to a sweep.")
+        print(f"wrote {args.out}")
+        return 0
+
+    if args.what == "apply":
+        raw = TS.load(args.capture)
+        cals = _cal_load(args.cal)
+        out = (CalBank(cals) if len(cals) > 1 else cals[0]).apply(
+            raw, enhanced=not args.no_enhanced)
+        TS.save(args.out, out.f, out.s, out.z0, out.comments)
+        print(f"wrote {args.out}")
+        for line in out.comments[len(raw.comments):]:
+            print("  " + line)
+        return 0
+
+    if args.what == "stitch":
+        bank = CalBank(_cal_load(args.cal))
+        print(f"{len(bank.cals)} calibrations covering {bank.coverage()}")
+        for c in bank.cals:
+            print(f"  {c.start/1e6:10.4f}-{c.stop/1e6:<10.4f} "
+                  f"{c.spacing/1e3:8.3f} kHz  {c.meta.get('notes', '')}")
+        return 0
+    return 1
+
+
 def cmd_gui(args):
     """Open the window.  Imported lazily so the CLI does not need tkinter."""
     from . import gui
@@ -613,6 +684,33 @@ def main(argv=None):
     q.add_argument("--port")
     q.add_argument("--replay", help="drive from a .s2p instead of hardware")
     q.set_defaults(fn=cmd_track)
+
+    q = sub.add_parser("cal", help="build, inspect, apply and stitch calibrations")
+    cs = q.add_subparsers(dest="what", required=True)
+    r = cs.add_parser("show", help="what is in a calibration file")
+    r.add_argument("files", nargs="+")
+    r = cs.add_parser("build", help="solve a calibration from measured standards")
+    for std in ("open", "short", "load"):
+        r.add_argument(f"--{std}", required=True, metavar="S2P")
+    r.add_argument("--thru", metavar="S2P", help="needed to correct S21")
+    r.add_argument("--isolation", metavar="S2P",
+                   help="both ports terminated; without it EX is assumed zero")
+    r.add_argument("--out", required=True)
+    r.add_argument("--notes", help="what this cal is for, in your words")
+    r = cs.add_parser("from-slot", help="archive the instrument's own calibration")
+    r.add_argument("slot", type=int)
+    r.add_argument("--out", required=True)
+    r.add_argument("--port")
+    r.add_argument("--notes")
+    r = cs.add_parser("apply", help="correct a raw sweep")
+    r.add_argument("capture")
+    r.add_argument("cal", nargs="+", help="one calibration, or several to stitch")
+    r.add_argument("--out", required=True)
+    r.add_argument("--no-enhanced", action="store_true",
+                   help="plain thru normalisation, without the source-match term")
+    r = cs.add_parser("stitch", help="report what a set of calibrations covers")
+    r.add_argument("cal", nargs="+")
+    q.set_defaults(fn=cmd_cal)
 
     q = sub.add_parser("gui", help="open the live tuning window")
     q.add_argument("netlist", nargs="?",

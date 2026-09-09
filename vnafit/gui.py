@@ -106,6 +106,9 @@ class App:
         self.target = {}                 # the values to tune TOWARD, frozen
         self._zoom = None                # (lo, hi, kind) for the inset
         self._gauge_note = ""
+        self.cal = None                  # a Calibration, applied to every sweep
+        self.cal_path = None
+        self._cal_warned = False
         self._inset = None
         self._pending = None             # analysis running in a worker
         self._fitting = None             # a fit running in a worker
@@ -171,6 +174,12 @@ class App:
                         command=self.redraw).pack(side="left", padx=(10, 0))
         ttk.Button(bar, text="set target", command=self.set_target
                    ).pack(side="left", padx=(2, 0))
+        ttk.Button(bar, text="Cal...", command=self.open_cal
+                   ).pack(side="left", padx=(8, 0))
+        self.v_cal = tk.BooleanVar(value=True)
+        self.calbtn = ttk.Checkbutton(bar, text="apply cal", variable=self.v_cal,
+                                      command=self.redraw, state="disabled")
+        self.calbtn.pack(side="left")
         self.v_zoom = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="zoom", variable=self.v_zoom,
                         command=self.redraw).pack(side="left", padx=(6, 0))
@@ -501,6 +510,51 @@ class App:
         self._rebuild_rows(self.rows, free={n for n, v in self.fit_on.items()
                                             if v.get()})
         self._draw_schematic()
+
+    # ----------------------------------------------------------- calibration
+    def open_cal(self):
+        from .calwin import CalWindow
+        CalWindow(self.root, self)
+
+    def set_calibration(self, cal, path=None):
+        """Adopt a calibration for everything measured from now on."""
+        self.cal, self.cal_path = cal, path
+        self.calbtn.configure(state="normal")
+        self.status.configure(
+            text=f"calibration: {os.path.basename(path) if path else 'in memory'}"
+                 f" -- {cal.start/1e6:.3f}-{cal.stop/1e6:.3f} MHz, "
+                 f"{cal.points} points, "
+                 f"{'S11 and S21' if cal.has_thru else 'S11 only'}",
+            foreground=OK)
+        self.redraw()
+
+    def load_cal(self, path):
+        from .cal import Calibration
+        self.set_calibration(Calibration.load(path), path)
+
+    def corrected(self, data):
+        """Apply the calibration to a raw sweep, or hand it back untouched.
+
+        A cal that does not cover the sweep is reported ONCE and then ignored,
+        rather than raising on every sweep of a live loop -- but it is never
+        applied outside its range, because that is the failure it exists to
+        prevent.
+        """
+        if data is None or self.cal is None or not self.v_cal.get():
+            return data
+        f, s11, s21 = data
+        S = np.zeros((len(f), 2, 2), complex)
+        S[:, 0, 0], S[:, 1, 0] = s11, s21
+        try:
+            out = self.cal.apply(touchstone.Touchstone(np.asarray(f, float), S))
+        except Exception as e:                              # noqa: BLE001
+            if not self._cal_warned:
+                self._cal_warned = True
+                self.status.configure(text=f"calibration not applied: {e}",
+                                      foreground=WARN)
+            return data
+        self._cal_warned = False
+        return f, out.s11, out.s21
 
     # ---------------------------------------------------------------- target
     def set_target(self, quiet=False):
@@ -963,7 +1017,7 @@ class App:
         elif data is not None and count != self._last_count:
             self._link(self._srcname, f"sweep {count}", OK)
             self._last_count = count
-            self.meas = data
+            self.meas = self.corrected(data)
             self.redraw()
             self.status.configure(text=f"sweep {count}", foreground=DIM)
             # A fit is 0.05-0.15 s on 1226 points with six free parameters,

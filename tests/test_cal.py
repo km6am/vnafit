@@ -434,3 +434,50 @@ def test_the_thru_gets_its_own_field():
     (o, s, l), kw = _standards(f)
     c = Calibration.from_standards(o, s, l, fixture={"thru": "SMA barrel"}, **kw)
     assert "SMA barrel" in c.describe()
+
+
+def test_a_fingerprint_must_come_from_a_fixed_sweep():
+    """`data 2..6` returns the calibration INTERPOLATED onto the current sweep,
+    so terms read at 101 points and at 401 hash differently.  Measured on an
+    H4, and a normalised-position digest across those two differed by a median
+    of 45%.  `cal_fingerprint` reads at a fixed sweep and restores yours.
+    """
+    from vnafit.slots import slot_hash
+
+    class Dev:
+        def __init__(self):
+            self.sweep = (90e6, 220e6, 101)
+            self.reads = []
+
+        def sweep_state(self):
+            return self.sweep
+
+        def cmd(self, s):
+            if s.startswith("sweep "):
+                a, b, n = s.split()[1:]
+                self.sweep = (int(a), int(b), int(n))
+            return []
+
+        def cal_terms(self):
+            self.reads.append(self.sweep)
+            n = self.sweep[2]                    # what the firmware does
+            x = np.linspace(0, 1, n)
+            return {k: (x + i) + 0j for i, k in enumerate(("ED", "ES", "ER"))}
+
+    from vnafit.vna import NanoVNA
+    d = Dev()
+    d.FINGERPRINT_SWEEP = NanoVNA.FINGERPRINT_SWEEP
+    d.cal_fingerprint = NanoVNA.cal_fingerprint.__get__(d)
+
+    t1, sw = d.cal_fingerprint()
+    assert sw == NanoVNA.FINGERPRINT_SWEEP
+    assert d.sweep == (90e6, 220e6, 101), "the instrument's sweep was not restored"
+
+    d.cmd("sweep 88000000 108000000 201")
+    t2, _ = d.cal_fingerprint()
+    assert slot_hash(t1) == slot_hash(t2), "the fingerprint followed the sweep"
+    assert d.reads == [NanoVNA.FINGERPRINT_SWEEP] * 2
+
+    # and the naive read really does differ, which is why the above is needed
+    d.cmd("sweep 90000000 220000000 101")
+    assert slot_hash(d.cal_terms()) != slot_hash(t1)

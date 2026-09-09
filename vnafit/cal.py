@@ -124,8 +124,12 @@ class Calibration:
 
     def describe(self):
         m = self.meta
-        out = [f"{self.start/1e6:.4f}-{self.stop/1e6:.4f} MHz, {self.points} "
-               f"points, {self.spacing/1e3:.3f} kHz spacing",
+        span = (f"{self.points} points, grid unknown -- read off the "
+                f"instrument, which does not report it"
+                if m.get("grid_unknown") else
+                f"{self.start/1e6:.4f}-{self.stop/1e6:.4f} MHz, {self.points} "
+                f"points, {self.spacing/1e3:.3f} kHz spacing")
+        out = [span,
                "corrects:        " + ("S11 and S21" if self.has_thru
                                       else "S11 only (no thru)"),
                f"made:            {m.get('source', 'unknown')} on {m.get('created')}"]
@@ -198,7 +202,7 @@ class Calibration:
         if slot is not None:
             dev.recall_cal(int(slot))
         st = dev.cal_status()
-        got = dev.cal_terms()
+        got, sweep = dev.cal_fingerprint()
         n = max(len(v) for v in got.values())
         if not n:
             raise CalError("the instrument returned no calibration data; "
@@ -212,6 +216,7 @@ class Calibration:
                       else "instrument, current",
             "notes": notes, "instrument": getattr(dev, "_info", None),
             "grid_unknown": True,
+            "read_at_sweep": list(sweep),
             "cal_status": " ".join(st["raw"]).strip()})
 
     # ------------------------------------------------------------- applying

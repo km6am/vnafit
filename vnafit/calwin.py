@@ -179,9 +179,8 @@ class CalWindow(tk.Toplevel):
             return
         self.devlab.configure(
             text=f"reply: {raw}\n"
-                 f"standards collected: "
-                 f"{', '.join(st['standards']) or 'none'}   "
-                 f"terms: {', '.join(st['terms']) or 'none'}\n"
+                 f"terms held: {', '.join(st['terms']) or 'none'}"
+                 f"{'' if st['complete'] else '  -- INCOMPLETE'}\n"
                  f"correction is {'ON' if st['enabled'] else 'OFF'}"
                  + ("" if st["enabled"] else
                     "  -- sweeps are raw until you turn it on or use your own")
@@ -197,7 +196,7 @@ class CalWindow(tk.Toplevel):
     def _slot_label(self, d, slot):
         """(text, terms) -- reads the slot's contents to validate the label."""
         try:
-            terms = d.cal_terms()
+            terms, _sw = d.cal_fingerprint()   # fixed sweep, or it will not compare
         except Exception as e:                              # noqa: BLE001
             return f"could not read the slot's contents ({e})", None
         rec, state = self._labels().get(getattr(d, "_info", None), slot, terms)
@@ -224,7 +223,7 @@ class CalWindow(tk.Toplevel):
             return
         slot = int(self.v_slot.get())
         try:
-            terms = d.cal_terms()
+            terms, _sw = d.cal_fingerprint()
         except Exception as e:                              # noqa: BLE001
             messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
             return

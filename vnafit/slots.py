@@ -42,9 +42,13 @@ def slot_hash(terms):
     """A stable fingerprint of a slot's calibration data.
 
     Over the terms in a fixed order, as canonical little-endian complex128, so
-    the same slot hashes the same on any machine.  These arrays are STORED on
-    the instrument rather than measured, so reading them twice gives identical
-    bytes -- which is what makes this usable as an identity at all.
+    the same slot hashes the same on any machine.
+
+    Feed it `NanoVNA.cal_fingerprint()`, not `cal_terms()`.  `data 2..6` returns
+    the calibration INTERPOLATED onto the current sweep, so terms read at 101
+    points and at 401 hash differently -- measured on an H4, and a
+    normalised-position digest across those two differed by a median of 45%.
+    `cal_fingerprint` reads at a fixed sweep and puts the instrument's back.
     """
     h = hashlib.sha256()
     for name in TERM_ORDER:

@@ -303,8 +303,15 @@ class NanoVNA:
     # which is a different thing from the correction being in use.
     CAL_STATUS, CAL_ON, CAL_OFF, CAL_RECALL = "cal", "cal on", "cal off", "recall %d"
     CAL_APPLIED = "cal'ed"
-    CAL_STANDARDS = ("load", "open", "short", "thru", "isoln")
-    CAL_TERMS = ("Es", "Er", "Et")
+    CAL_COLLECT = ("open", "short", "thru")
+    # `#define CALSTAT_ED CALSTAT_LOAD` and `#define CALSTAT_EX CALSTAT_ISOLN`
+    # -- the same BITS, so once a calibration is finished the words "load" and
+    # "isoln" mean the ED and EX terms exist, not that a standard is merely
+    # sitting collected.  Reporting them as standards made a complete
+    # calibration read as a half-finished one: a real H4 answers
+    # "load isoln Es Er Et cal'ed", which is all five terms and applied.
+    CAL_TERM_WORDS = {"load": "ED", "isoln": "EX",
+                      "Es": "ES", "Er": "ER", "Et": "ET"}
 
     def cal_status(self):
         """What the instrument says about its own correction.
@@ -312,8 +319,9 @@ class NanoVNA:
         Returns a dict with
 
             enabled     True/False/None -- correction is being APPLIED
-            standards   which standards have been collected
-            terms       which error terms have been computed
+            terms       which error terms the instrument holds
+            complete    ED, ES and ER present, i.e. S11 can be corrected
+            collected   raw standards still flagged as collected
             raw         the reply, verbatim
 
         `enabled` is None only when the instrument could not be asked.  An
@@ -323,19 +331,55 @@ class NanoVNA:
         try:
             out = self.cmd(self.CAL_STATUS)
         except Exception as e:                              # noqa: BLE001
-            return {"raw": [], "enabled": None, "standards": (), "terms": (),
-                    "error": str(e)}
+            return {"raw": [], "enabled": None, "terms": (), "complete": False,
+                    "collected": (), "error": str(e)}
         words = " ".join(out).split()
+        terms = tuple(v for k, v in self.CAL_TERM_WORDS.items() if k in words)
         return {"raw": out,
                 "enabled": self.CAL_APPLIED in words,
-                "standards": tuple(w for w in self.CAL_STANDARDS if w in words),
-                "terms": tuple(w for w in self.CAL_TERMS if w in words)}
+                "terms": terms,
+                "complete": {"ED", "ES", "ER"} <= set(terms),
+                "collected": tuple(w for w in self.CAL_COLLECT if w in words)}
+
+    # A fixed sweep used only for fingerprinting a slot.  `data 2..6` does NOT
+    # return the stored calibration -- it returns that calibration INTERPOLATED
+    # onto whatever span and point count the instrument is currently sweeping.
+    # Measured on an H4: the same untouched slot hashed three different ways at
+    # 101, 201 and 401 points, and a normalised-position digest across the two
+    # extremes differed by a median of 45%.  So a fingerprint is only meaningful
+    # if it is always taken at the same setting.
+    FINGERPRINT_SWEEP = (1_000_000, 900_000_000, 401)
+
+    def sweep_state(self):
+        """(start, stop, points) the instrument is set to, or None."""
+        try:
+            p = " ".join(self.cmd("sweep")).split()
+            return (int(p[0]), int(p[1]), int(p[2])) if len(p) >= 3 else None
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def cal_fingerprint(self):
+        """The slot's error terms read at a FIXED sweep, so they compare.
+
+        Puts the instrument's sweep back afterwards.  Returns (terms, sweep).
+        """
+        before = self.sweep_state()
+        a, b, n = self.FINGERPRINT_SWEEP
+        try:
+            self.cmd(f"sweep {a} {b} {n}")
+            terms = self.cal_terms()
+        finally:
+            if before:
+                self.cmd("sweep %d %d %d" % before)
+        return terms, self.FINGERPRINT_SWEEP
 
     def cal_terms(self):
         """Download the instrument's calibration error terms.
 
-        `data 2..6` returns cal_data[0..4] -- the five terms ED, ES, ER, ET, EX.
-        Returns {name: complex array}.  There is no command to write them back:
+        `data 2..6` returns cal_data[0..4] -- the five terms ED, ES, ER, ET, EX,
+        INTERPOLATED ONTO THE CURRENT SWEEP.  Use `cal_fingerprint()` when the
+        answer has to be comparable between calls.  There is no command to write
+        them back:
         the firmware exposes no upload, so a calibration can be read off the
         instrument and archived, but only re-created by running the standards
         again or by `recall`ing a slot.
@@ -374,7 +418,7 @@ class NanoVNA:
                 f"{st.get('error', 'no reply')}")
         if got and not want:
             pass
-        if got != want and want and not st["standards"]:
+        if got != want and want and not st["terms"]:
             raise IOError(
                 "correction cannot be switched on: this instrument has no "
                 "calibration collected (bare `cal` returns nothing).  There is "

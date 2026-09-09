@@ -453,12 +453,21 @@ def cmd_sweep(args):
     dev = NanoVNA(args.port)
     try:
         print(f"device {dev._info}")
-        f, s11, s21 = dev.scan(args.start, args.stop, args.points)
+        import contextlib
+        with (dev.uncorrected() if args.no_cal else contextlib.nullcontext()):
+            if args.no_cal:
+                print("instrument correction OFF for this sweep "
+                      "(restored when the sweep finishes)")
+            f, s11, s21 = dev.scan(args.start, args.stop, args.points)
         S = np.zeros((len(f), 2, 2), complex)
         S[:, 0, 0], S[:, 1, 0] = s11, s21
+        # The correction state goes IN THE FILE.  A capture whose calibration is
+        # unknown six months later cannot be reasoned about, and this project
+        # has already lost an afternoon to exactly that question.
         touchstone.save(args.out, f, S, comments=[
             f"vnafit sweep", f"device {dev.portname}",
             f"span {args.start/1e6:.4f}-{args.stop/1e6:.4f} MHz points {len(f)}",
+            f"instrument correction: {'OFF (raw)' if args.no_cal else 'as configured on the instrument'}",
             "S12 and S22 are NOT measured by this instrument and are written as zero"])
         print(f"wrote {args.out}")
         for line in _trace_summary(f, s21, s11):
@@ -618,6 +627,9 @@ def main(argv=None):
     q.add_argument("--stop", type=float, required=True)
     q.add_argument("--points", type=int, default=401)
     q.add_argument("--port")
+    q.add_argument("--no-cal", action="store_true",
+                   help="sweep with the instrument's own correction OFF; it is "
+                        "restored afterwards, and the .s2p records which it was")
     q.set_defaults(fn=cmd_sweep)
 
     args = ap.parse_args(argv)

@@ -218,3 +218,100 @@ def test_find_refuses_a_port_that_is_obviously_not_a_nanovna(monkeypatch):
     assert NanoVNA.find(any_port=True) == "/dev/cu.Bluetooth-Incoming-Port"
     with pytest.raises(IOError, match="none of them identifies as a NanoVNA"):
         NanoVNA()
+
+
+class FakeSerial:
+    """A serial port that answers `cal` the way DiSlord firmware does."""
+
+    def __init__(self, enabled=True, understands=True):
+        self.enabled, self.understands = enabled, understands
+        self.sent = []
+        self._buf = b""
+
+    def reset_input_buffer(self):
+        pass
+
+    def write(self, b):
+        s = b.decode().strip()
+        self.sent.append(s)
+        if s == "cal" and self.understands:
+            body = "state: %s\r\n" % ("on" if self.enabled else "off")
+        elif s == "cal on" and self.understands:
+            self.enabled = True; body = ""
+        elif s == "cal off" and self.understands:
+            self.enabled = False; body = ""
+        else:
+            body = ""                       # firmware that does not know it
+        self._buf = (s + "\r\n" + body + "ch> ").encode()
+
+    def read(self, n=1):
+        out, self._buf = self._buf[:n], self._buf[n:]
+        return out
+
+    def close(self):
+        pass
+
+
+def _dev(**kw):
+    from vnafit.vna import NanoVNA
+    d = NanoVNA.__new__(NanoVNA)          # no port, no probe
+    d.ser = FakeSerial(**kw)
+    d._lock = __import__("threading").RLock()
+    d.portname = "fake"
+    d._closed = False
+    d._read_to_prompt = lambda: d.ser._buf[:0] or _drain(d.ser)
+    return d
+
+
+def _drain(ser):
+    out = b""
+    while True:
+        c = ser.read(1)
+        if not c:
+            break
+        out += c
+    return out
+
+
+def test_correction_can_be_switched_and_is_verified_by_reading_back():
+    d = _dev(enabled=True)
+    assert d.cal_status()["enabled"] is True
+    d.set_correction(False)
+    assert d.cal_status()["enabled"] is False
+    assert "cal off" in d.ser.sent
+
+
+def test_a_firmware_that_ignores_the_command_raises_rather_than_lying():
+    """Measuring uncorrected while believing you are corrected is worse than
+    not being able to switch, so an unreadable reply is an error."""
+    import pytest
+    d = _dev(understands=False)
+    with pytest.raises(IOError, match="cannot be read"):
+        d.set_correction(False)
+
+
+def test_uncorrected_puts_the_correction_back():
+    d = _dev(enabled=True)
+    with d.uncorrected():
+        assert d.cal_status()["enabled"] is False
+    assert d.cal_status()["enabled"] is True
+
+
+def test_close_restores_the_correction_even_if_the_block_is_abandoned():
+    """An instrument left silently uncalibrated is worse to walk away from than
+    a frozen screen: it looks completely normal."""
+    d = _dev(enabled=True)
+    d.set_correction(False)
+    d._cal_restore = True                 # as `uncorrected` would have set it
+    d.resume = lambda: True
+    d.close()
+    assert d.ser.sent[-1] == "cal on"
+
+
+def test_replay_refuses_to_pretend_it_has_a_calibration():
+    import pytest
+    from vnafit.vna import Replay
+    r = Replay.__new__(Replay)
+    assert r.cal_status()["enabled"] is None
+    with pytest.raises(IOError, match="cannot change its calibration"):
+        r.set_correction(False)

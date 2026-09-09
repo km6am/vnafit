@@ -51,6 +51,35 @@ the requested span; `resume`, `pause` and `close` do nothing. It also carries
 passive DUT cannot reflect more than it receives, so that means a bad
 calibration, not a strange filter.
 
+## Calibration
+
+The driver can switch the instrument's own error correction, and put it back.
+
+```python
+with NanoVNA() as dev:
+    with dev.uncorrected():                   # correction off
+        f, s11, s21 = dev.scan(130e6, 165e6, 401)
+    # correction is back on here, and on close, and on SIGTERM
+```
+
+| | |
+|---|---|
+| `cal_status()` | `{"raw": [...], "enabled": True/False/None}`. `None` means the reply could not be read — the honest answer, and deliberately not `False`. |
+| `set_correction(on)` | switch it, **verified by reading the state back**. Raises if the firmware did not understand, rather than returning a cheerful `True`. |
+| `recall_cal(slot)` | load one of the instrument's stored calibrations. |
+| `uncorrected()` | context manager: correction off for the block, restored after. |
+
+**The command spellings are the one part of this file not verified against
+hardware.** They are constants — `CAL_STATUS`, `CAL_ON`, `CAL_OFF`,
+`CAL_RECALL` — so a firmware that spells them differently needs one line
+changed, and every method reads the state back so a wrong spelling surfaces as
+an error instead of a silent no-op. Run `python vna.py --probe-cal` to see what
+your firmware actually exposes; it changes nothing.
+
+**Restored the same way the display is.** An abandoned process cannot leave the
+instrument silently uncalibrated, which is a worse thing to walk away from than
+a frozen screen because it looks completely normal.
+
 ## Two things that will bite you
 
 **The H4 measures S11 and S21 only.** There is no S12 or S22: it is a
@@ -87,6 +116,8 @@ part to read before trusting it.
 ```bash
 python vna.py                                        # list ports, mark likely ones
 python vna.py --sweep out.s2p --start 130e6 --stop 165e6 --points 401 --average 2
+python vna.py --probe-cal                            # what does this firmware expose?
+python vna.py --sweep raw.s2p --start 130e6 --stop 165e6 --no-cal   # correction off
 ```
 
 Port autodetection returns only a port whose USB identity looks like a NanoVNA.

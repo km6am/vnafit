@@ -22,7 +22,7 @@ file-only with no hardware present.
 The H4 enumerates as /dev/cu.usbmodem*.  Commands are newline-terminated and
 the device echoes them back before the data, then prints the 'ch> ' prompt.
 """
-import atexit, os, signal, threading, time, numpy as np
+import atexit, contextlib, os, signal, threading, time, numpy as np
 
 PROMPT = b"ch> "
 # USB CDC identities seen on NanoVNA-H / -H4 (STM32 virtual COM port)
@@ -288,6 +288,88 @@ class NanoVNA:
         except Exception:
             return False
 
+    # ----------------------------------------------------------- calibration
+    # The firmware's own command spellings, in one place because they are the
+    # part of this file NOT verified against hardware.  Every method below
+    # reads the state back rather than trusting that a command was understood,
+    # so a wrong spelling surfaces as a clear error instead of a silent no-op.
+    CAL_STATUS, CAL_ON, CAL_OFF, CAL_RECALL = "cal", "cal on", "cal off", "recall %d"
+
+    def cal_status(self):
+        """What the instrument says about its own correction.
+
+        Returns {"raw": [lines], "enabled": True/False/None}.  `enabled` is None
+        when the reply cannot be read -- which is the honest answer for firmware
+        this has not been checked against, and is deliberately not False.
+        """
+        try:
+            out = self.cmd(self.CAL_STATUS)
+        except Exception as e:                              # noqa: BLE001
+            return {"raw": [], "enabled": None, "error": str(e)}
+        txt = " ".join(out).lower()
+        enabled = None
+        if "off" in txt and "on" not in txt:
+            enabled = False
+        elif "on" in txt and "off" not in txt:
+            enabled = True
+        return {"raw": out, "enabled": enabled}
+
+    def set_correction(self, on):
+        """Turn the instrument's own error correction on or off.
+
+        VERIFIED BY READING BACK.  If the firmware does not understand the
+        command the state will not have changed, and this raises rather than
+        returning a cheerful True -- measuring uncorrected when you think you
+        are corrected, or the reverse, is worse than not being able to switch.
+        """
+        want = bool(on)
+        self.cmd(self.CAL_ON if want else self.CAL_OFF)
+        got = self.cal_status()["enabled"]
+        if got is None:
+            raise IOError(
+                f"sent {self.CAL_ON if want else self.CAL_OFF!r} but this "
+                f"firmware's `{self.CAL_STATUS}` reply cannot be read, so "
+                f"whether correction is on is unknown.  Check `cal_status()"
+                f"['raw']` and set NanoVNA.CAL_* to this firmware's spelling.")
+        if got != want:
+            raise IOError(f"asked for correction {'on' if want else 'off'}, "
+                          f"instrument reports {'on' if got else 'off'}")
+        self._cal_forced = want
+        return True
+
+    def recall_cal(self, slot):
+        """Load one of the instrument's stored calibrations."""
+        self.cmd(self.CAL_RECALL % int(slot))
+        return self.cal_status()
+
+    @contextlib.contextmanager
+    def uncorrected(self):
+        """Sweep with the instrument's correction off, then put it back.
+
+        Restored through the same registry that hands the display back, so an
+        abandoned process cannot leave the instrument silently uncalibrated --
+        which is a worse thing to leave behind than a frozen screen, because it
+        looks completely normal.
+        """
+        before = self.cal_status()["enabled"]
+        self.set_correction(False)
+        self._cal_restore = before
+        try:
+            yield self
+        finally:
+            self._restore_cal()
+
+    def _restore_cal(self):
+        """Put the correction back the way it was found.  Never raises."""
+        want = getattr(self, "_cal_restore", None)
+        if want is None:
+            return
+        self._cal_restore = None
+        try:
+            self.cmd(self.CAL_ON if want else self.CAL_OFF)
+        except Exception:                                   # noqa: BLE001
+            pass
+
     def resume(self):
         """Hand the display back to the instrument.
 
@@ -394,6 +476,7 @@ class NanoVNA:
             return
         self._closed = True
         _OPEN.discard(self)
+        self._restore_cal()           # never leave it silently uncalibrated
         self.resume()                 # never leave the screen frozen
         try: self.ser.close()
         except Exception: pass
@@ -473,6 +556,25 @@ class Replay:
     def resume(self): return True     # a replay file has no screen
     def pause(self): return True
 
+    # A file is whatever it was when it was captured.  Reporting `enabled=None`
+    # rather than True or False is the honest answer: the correction state is
+    # not knowable from a Touchstone, and pretending otherwise would let an
+    # application believe it had switched something.
+    def cal_status(self):
+        return {"raw": ["replay: correction state is a property of the capture"],
+                "enabled": None}
+
+    def set_correction(self, on):
+        raise IOError("a replay file cannot change its calibration; it was "
+                      "captured however it was captured")
+
+    def recall_cal(self, slot):
+        return self.cal_status()
+
+    @contextlib.contextmanager
+    def uncorrected(self):
+        yield self                    # nothing to switch, nothing to restore
+
 
 # --------------------------------------------------------------------- as a tool
 def _write_s2p(path, f, s11, s21, comments=()):
@@ -507,7 +609,35 @@ def main(argv=None):
                          "does in one pass")
     ap.add_argument("--average", type=int, default=1)
     ap.add_argument("--ifbw", type=int, help="DiSlord bandwidth code, 0 narrowest")
+    ap.add_argument("--no-cal", action="store_true",
+                    help="sweep with the instrument's own correction OFF, and "
+                         "put it back afterwards")
+    ap.add_argument("--recall", type=int, metavar="SLOT",
+                    help="load a stored calibration slot before sweeping")
+    ap.add_argument("--probe-cal", action="store_true",
+                    help="report what this firmware exposes about calibration "
+                         "and change nothing")
     args = ap.parse_args(argv)
+
+    if args.probe_cal:
+        # Read-only.  This exists because the calibration command spellings are
+        # the one part of this driver not verified against hardware, and the
+        # instrument is a better authority than anybody's memory.
+        with NanoVNA(args.port) as dev:
+            print(f"device {dev._info}\n")
+            for c in ("help", "cal", "info"):
+                try:
+                    out = dev.cmd(c)
+                except Exception as e:                      # noqa: BLE001
+                    out = [f"<{type(e).__name__}: {e}>"]
+                print(f"--- {c} ---")
+                print("\n".join(out[:40]) or "  (no reply)")
+                print()
+            st = dev.cal_status()
+            print(f"parsed correction state: {st['enabled']!r}"
+                  f"{'  <- unreadable; set NanoVNA.CAL_* for this firmware'
+                     if st['enabled'] is None else ''}")
+        return 0
 
     if not args.sweep:
         ports = NanoVNA.list_ports()
@@ -521,20 +651,27 @@ def main(argv=None):
 
     with NanoVNA(args.port) as dev:
         print(f"device {dev._info}")
+        if args.recall is not None:
+            print(f"recall {args.recall}: {dev.recall_cal(args.recall)['raw']}")
         if args.ifbw is not None:
             dev.set_bandwidth(args.ifbw)
-        acc = None
-        for _ in range(max(1, args.average)):
-            f, a, b = dev.scan_hires(args.start, args.stop, args.segments,
-                                     args.points)
-            acc = (f, a, b) if acc is None else (f, acc[1] + a, acc[2] + b)
+        ctx = dev.uncorrected() if args.no_cal else contextlib.nullcontext()
+        with ctx:
+            if args.no_cal:
+                print("correction OFF for this sweep; it is restored on exit")
+            acc = None
+            for _ in range(max(1, args.average)):
+                f, a, b = dev.scan_hires(args.start, args.stop, args.segments,
+                                         args.points)
+                acc = (f, a, b) if acc is None else (f, acc[1] + a, acc[2] + b)
         n = max(1, args.average)
         f, s11, s21 = acc[0], acc[1] / n, acc[2] / n
         _write_s2p(args.sweep, f, s11, s21, comments=[
             f"NanoVNA sweep via {os.path.basename(__file__)}",
             f"device {dev.portname}",
             f"span {args.start/1e6:.4f}-{args.stop/1e6:.4f} MHz, "
-            f"{len(f)} points, {args.segments} segment(s), {n} average(s)"])
+            f"{len(f)} points, {args.segments} segment(s), {n} average(s)",
+            f"instrument correction: {'OFF (raw)' if args.no_cal else 'as configured'}"])
         d = 20 * np.log10(np.maximum(np.abs(s21), 1e-12))
         print(f"wrote {args.sweep}: {len(f)} points, "
               f"{f[0]/1e6:.4f}-{f[-1]/1e6:.4f} MHz")

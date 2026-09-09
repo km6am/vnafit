@@ -191,6 +191,12 @@ class App:
         self.link = tk.Label(bar, text="\u25cf  no source", fg=DIM, width=40,
                              anchor="e", font=("TkDefaultFont", 11))
         self.link.pack(side="right", padx=(10, 2))
+        # Separate from the connection indicator on purpose: "connected" and
+        # "corrected" are different questions and the second is the one that
+        # silently changes what the numbers mean.
+        self.callab = tk.Label(bar, text="cal: none", fg=DIM, width=26,
+                               anchor="e", font=("TkDefaultFont", 11))
+        self.callab.pack(side="right")
 
         body = ttk.Frame(outer)
         body.pack(fill="both", expand=True, pady=(6, 0))
@@ -517,16 +523,78 @@ class App:
         CalWindow(self.root, self)
 
     def set_calibration(self, cal, path=None):
-        """Adopt a calibration for everything measured from now on."""
+        """Adopt our own calibration -- and switch the instrument's own OFF.
+
+        These two are alternatives, not layers.  Correcting a sweep that the
+        instrument has already corrected applies the error model twice, and the
+        result looks entirely plausible: smooth, physical, and wrong.  So
+        adopting a local calibration turns the device's correction off for the
+        session and says so; closing the window puts it back, through the same
+        registry that hands the display back on SIGTERM.
+        """
         self.cal, self.cal_path = cal, path
         self.calbtn.configure(state="normal")
+        note = ""
+        if self.dev is not None:
+            try:
+                if self.dev.cal_status()["enabled"]:
+                    self.dev.set_correction(False)
+                    self.dev._cal_restore = True   # restored on close
+                    note = "; instrument correction switched OFF"
+            except Exception as e:                          # noqa: BLE001
+                note = f"; COULD NOT switch the instrument's correction off ({e})"
         self.status.configure(
-            text=f"calibration: {os.path.basename(path) if path else 'in memory'}"
+            text=f"using {os.path.basename(path) if path else 'a local cal'}"
                  f" -- {cal.start/1e6:.3f}-{cal.stop/1e6:.3f} MHz, "
                  f"{cal.points} points, "
-                 f"{'S11 and S21' if cal.has_thru else 'S11 only'}",
+                 f"{'S11 and S21' if cal.has_thru else 'S11 only'}{note}",
             foreground=OK)
+        self._cal_indicator()
         self.redraw()
+
+    def use_device_cal(self, slot=None):
+        """Go the other way: let the instrument correct, and drop ours."""
+        if self.dev is None:
+            return
+        if slot is not None:
+            self.dev.recall_cal(slot)
+        self.dev._cal_restore = None
+        self.dev.set_correction(True)
+        self.cal, self.cal_path = None, None
+        self.calbtn.configure(state="disabled")
+        self._cal_indicator()
+        self.redraw()
+
+    def cal_state(self):
+        """(text, colour) describing what is correcting the data RIGHT NOW.
+
+        Read back from the instrument rather than remembered, because the
+        interesting failure is the one where what we believe and what the
+        instrument is doing have come apart.
+        """
+        dev_on = None
+        if self.dev is not None:
+            try:
+                dev_on = self.dev.cal_status()["enabled"]
+            except Exception:                               # noqa: BLE001
+                dev_on = None
+        local = self.cal is not None and self.v_cal.get()
+        if self.dev is None and not local:
+            return "cal: none", DIM
+        if local and dev_on:
+            return "cal: BOTH -- corrected twice", BAD
+        if local:
+            name = os.path.basename(self.cal_path) if self.cal_path else "local"
+            return f"cal: {name}", OK
+        if dev_on:
+            return "cal: instrument", OK
+        if dev_on is False:
+            return "cal: NONE -- raw", BAD
+        return "cal: unknown", WARN
+
+    def _cal_indicator(self):
+        txt, col = self.cal_state()
+        self.callab.configure(text=txt, fg=col)
 
     def load_cal(self, path):
         from .cal import Calibration
@@ -930,6 +998,7 @@ class App:
             except Exception:                               # noqa: BLE001
                 pass
         self._link_idle()
+        self._cal_indicator()
 
     def on_close(self):
         self.stop()
@@ -1016,6 +1085,7 @@ class App:
             self._link(self._srcname, str(err), BAD)
         elif data is not None and count != self._last_count:
             self._link(self._srcname, f"sweep {count}", OK)
+            self._cal_indicator()
             self._last_count = count
             self.meas = self.corrected(data)
             self.redraw()

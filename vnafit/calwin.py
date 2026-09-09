@@ -42,6 +42,8 @@ class CalWindow(tk.Toplevel):
         self.grid_f = None
         self._build()
         self._refresh()
+        if getattr(app, "dev", None) is not None:
+            self.read_device()
 
     # ------------------------------------------------------------------ ui
     def _build(self):
@@ -56,6 +58,27 @@ class CalWindow(tk.Toplevel):
                        "calibrating through an existing calibration is "
                        "circular, and the result looks perfectly fine."
                   ).pack(anchor="w", pady=(2, 0))
+
+        # ---- path one: the instrument's own -------------------------------
+        dev = ttk.LabelFrame(self, text=" Use the instrument's calibration ",
+                             padding=8)
+        dev.pack(fill="x", padx=8, pady=(6, 2))
+        r = ttk.Frame(dev); r.pack(fill="x")
+        ttk.Label(r, text="slot").pack(side="left")
+        self.v_slot = tk.StringVar(value="0")
+        ttk.Entry(r, textvariable=self.v_slot, width=4).pack(side="left", padx=4)
+        ttk.Button(r, text="Recall and use",
+                   command=self.use_device).pack(side="left")
+        ttk.Button(r, text="Read state",
+                   command=self.read_device).pack(side="left", padx=6)
+        self.devlab = ttk.Label(dev, foreground="#5f6873", wraplength=560,
+                                justify="left", text="")
+        self.devlab.pack(anchor="w", pady=(4, 0))
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=8, pady=6)
+        ttk.Label(self, text="  ...or make your own, which switches the "
+                             "instrument's correction OFF",
+                  foreground="#5f6873").pack(anchor="w", padx=8)
 
         span = ttk.Frame(self, padding=(8, 2))
         span.pack(fill="x")
@@ -108,6 +131,52 @@ class CalWindow(tk.Toplevel):
         self.savebtn.pack(side="right")
         ttk.Button(foot, text="Close", command=self.destroy).pack(
             side="right", padx=6)
+
+    # ---------------------------------------------- the instrument's own
+    def _dev(self):
+        d = getattr(self.app, "dev", None)
+        if d is None:
+            messagebox.showinfo("calibration", "Connect a VNA first.")
+        return d
+
+    def read_device(self):
+        d = self._dev()
+        if d is None:
+            return
+        try:
+            st = d.cal_status()
+        except Exception as e:                              # noqa: BLE001
+            self.devlab.configure(text=f"{type(e).__name__}: {e}")
+            return
+        raw = " ".join(st["raw"]).strip()
+        if not raw:
+            self.devlab.configure(
+                text="the instrument holds NO calibration.  There is no factory "
+                     "default to fall back on -- it ships uncalibrated, and "
+                     "`cal reset` returns it to that.")
+            return
+        self.devlab.configure(
+            text=f"reply: {raw}\n"
+                 f"standards collected: "
+                 f"{', '.join(st['standards']) or 'none'}   "
+                 f"terms: {', '.join(st['terms']) or 'none'}\n"
+                 f"correction is {'ON' if st['enabled'] else 'OFF'}"
+                 + ("" if st["enabled"] else
+                    "  -- sweeps are raw until you turn it on or use your own")
+                 + "\n\nNote: the instrument does not report the span its "
+                   "calibration was taken over, and does not say when it is "
+                   "interpolating one.  That is what a local calibration is for.")
+
+    def use_device(self):
+        d = self._dev()
+        if d is None:
+            return
+        try:
+            self.app.use_device_cal(int(self.v_slot.get()))
+        except Exception as e:                              # noqa: BLE001
+            messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
+            return
+        self.read_device()
 
     # ------------------------------------------------------------- capture
     def _cfg(self):

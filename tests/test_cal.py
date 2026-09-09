@@ -239,3 +239,99 @@ def test_the_window_refuses_standards_swept_on_different_grids():
         assert len(w.grid_f) == 401
     finally:
         root.destroy()
+
+
+# ------------------------------------------------- which cal is in effect
+class _FakeDev:
+    """An instrument whose correction can be switched, and read back."""
+    _info = "fake H4"
+
+    def __init__(self, enabled=True, calibrated=True):
+        self.enabled, self.calibrated = enabled, calibrated
+        self.recalled = None
+        self._cal_restore = None
+
+    def cal_status(self):
+        return {"enabled": self.enabled and self.calibrated,
+                "standards": ("load", "open", "short") if self.calibrated else (),
+                "terms": (), "raw": ["cal'ed"] if self.enabled else []}
+
+    def set_correction(self, on):
+        self.enabled = bool(on)
+        return True
+
+    def recall_cal(self, slot):
+        self.recalled = slot
+        self.calibrated = True
+        return self.cal_status()
+
+
+def _app_with(dev, cal=None):
+    import tkinter as tk
+    from vnafit.gui import App
+    try:
+        root = tk.Tk()
+    except tk.TclError:                                     # pragma: no cover
+        pytest.skip("no display")
+    root.withdraw()
+    app = App(root, "examples/tinyfilter.net")
+    app.dev = dev
+    if cal is not None:
+        app.set_calibration(cal, "2m.calz")
+    return root, app
+
+
+def test_adopting_a_local_cal_switches_the_instruments_own_off():
+    """They are alternatives, not layers.  Correcting a sweep the instrument has
+    already corrected applies the error model twice, and the result looks
+    entirely plausible: smooth, physical, and wrong."""
+    f = np.linspace(130e6, 165e6, 51)
+    dev = _FakeDev(enabled=True)
+    root, app = _app_with(dev, _cal(f))
+    try:
+        assert dev.enabled is False, "the instrument is still correcting too"
+        assert dev._cal_restore is True, "and it would not be put back"
+        txt, _c = app.cal_state()
+        assert txt == "cal: 2m.calz"
+    finally:
+        root.destroy()
+
+
+def test_the_indicator_names_the_dangerous_state_rather_than_hiding_it():
+    f = np.linspace(130e6, 165e6, 51)
+    dev = _FakeDev(enabled=True)
+    root, app = _app_with(dev, _cal(f))
+    try:
+        dev.enabled = True                    # as if something turned it back on
+        txt, col = app.cal_state()
+        assert "BOTH" in txt and "twice" in txt
+        from vnafit.gui import BAD
+        assert col == BAD
+    finally:
+        root.destroy()
+
+
+def test_raw_data_is_called_raw():
+    """Uncorrected with no local cal is a real state and the easiest one to be
+    in by accident, so it is named rather than left blank."""
+    root, app = _app_with(_FakeDev(enabled=False))
+    try:
+        txt, col = app.cal_state()
+        assert txt == "cal: NONE -- raw"
+        from vnafit.gui import BAD
+        assert col == BAD
+    finally:
+        root.destroy()
+
+
+def test_going_back_to_the_instrument_drops_ours_and_recalls_the_slot():
+    f = np.linspace(130e6, 165e6, 51)
+    dev = _FakeDev(enabled=True)
+    root, app = _app_with(dev, _cal(f))
+    try:
+        app.use_device_cal(2)
+        assert dev.recalled == 2 and dev.enabled is True
+        assert app.cal is None, "the local cal must not still be applied"
+        assert app.cal_state()[0] == "cal: instrument"
+    finally:
+        root.destroy()

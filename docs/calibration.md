@@ -11,6 +11,50 @@ That is enough to lose an afternoon to — this project did, on a filter whose
 outside where it was taken. **A calibration you cannot audit is a number you
 have to trust.**
 
+## Two paths, and they do not mix
+
+There are exactly two ways to get corrected data, and **using both at once
+corrects twice**. That failure is quiet: the result is smooth, physical and
+wrong, because an error model applied a second time still produces a
+well-behaved curve.
+
+| | who corrects | the instrument's correction | what you get |
+|---|---|---|---|
+| **Instrument calibration** | the H4 | **on** — `recall N` chooses the slot | corrected S11/S21 straight from the wire |
+| **Your calibration** | vnafit | **off** — forced when you adopt one | raw sweeps, corrected here with terms you can inspect |
+| **Neither** | nobody | off | raw. A real state, and the easiest one to be in by accident |
+
+Adopting a local calibration **switches the instrument's correction off for you**
+and restores it when the window closes — through the same registry that hands
+the display back on SIGTERM. `Recall and use` in the calibration window goes the
+other way: it recalls the slot, turns the instrument's correction on, and drops
+the local one.
+
+### The status line always says which
+
+Beside the connection indicator, and read **back from the instrument** rather
+than remembered — the interesting failure is the one where what the software
+believes and what the instrument is doing have come apart:
+
+```
+cal: instrument            the H4 is correcting
+cal: 2m.calz               we are, and the H4 is not
+cal: NONE -- raw           nobody is                        (red)
+cal: BOTH -- corrected twice                                (red)
+```
+
+### Yes, you can choose a slot
+
+`recall N` — `dev.recall_cal(2)`, or the slot box in the calibration window.
+Two things the instrument will not tell you, which is most of the reason this
+module exists:
+
+- **the span its calibration was taken over.** It interpolates across whatever
+  you sweep and reports nothing.
+- **when it is interpolating.** `CALSTAT_INTERPOLATED` is bit 9 of `cal_status`,
+  and the firmware's status loop prints bits 0–8. The instrument knows and there
+  is no way to ask it.
+
 ## Making one
 
 In the window: **`Cal…`**, which steps through the standards.

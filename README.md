@@ -83,6 +83,7 @@ loop can be exercised without a VNA.
 | [Netlist format](docs/netlist-format.md) | the SPICE subset, the RF extras (`Q=`, `.port`, `.fit`), and exchanging files with LTspice, EasyEDA, KiCad, ngspice |
 | [What a measurement can determine](docs/identifiability.md) | structural vs practical identifiability, gauge freedoms, why a fit walks, and what the tool refuses to report |
 | [The solver](docs/engine.md) | vectorised MNA, what it refuses to do, the schematic layout, testing |
+| [The helical bench](docs/helical.md) | designing a 1–4 section helical, and the align / couple / gap / measure sequence as reduced netlists |
 | [Calibration](docs/calibration.md) | deriving your own calibrations, applying them in software, stitching them, and what the file records so it can be checked |
 | [The NanoVNA driver](docs/nanovna-driver.md) | the single-file driver on its own: API reference, what the H4 does not measure, and why the instrument is always handed back free-running |
 | [Installing](docs/install.md) | why tkinter decides the install path, and why the launcher gates on the Python version as well as the imports |

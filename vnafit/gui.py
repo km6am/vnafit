@@ -174,8 +174,10 @@ class App:
                         command=self.redraw).pack(side="left", padx=(10, 0))
         ttk.Button(bar, text="set target", command=self.set_target
                    ).pack(side="left", padx=(2, 0))
-        ttk.Button(bar, text="Cal...", command=self.open_cal
+        ttk.Button(bar, text="Helical...", command=self.open_helical
                    ).pack(side="left", padx=(8, 0))
+        ttk.Button(bar, text="Cal...", command=self.open_cal
+                   ).pack(side="left", padx=(2, 0))
         self.v_cal = tk.BooleanVar(value=True)
         self.calbtn = ttk.Checkbutton(bar, text="apply cal", variable=self.v_cal,
                                       command=self.redraw, state="disabled")
@@ -269,6 +271,18 @@ class App:
         if p:
             self.load_netlist(p)
 
+    def adopt_netlist(self, nl, name):
+        """Take a netlist built in memory -- a synthesised design, say.
+
+        Shares everything after parsing with `load_netlist`, because a
+        synthesised model has to card, fit, draw and tune exactly like one read
+        off disk; anything it did differently would be a second code path to
+        keep in step.
+        """
+        self.nl, self.import_report = nl, None
+        self.netlist_path = None
+        self._after_netlist(name)
+
     def load_netlist(self, path):
         try:
             from . import spice as SP
@@ -284,6 +298,9 @@ class App:
         # context without someone to click it.
         self.import_report = report.text() if report is not None else None
         self.netlist_path = path
+        self._after_netlist(os.path.basename(path))
+
+    def _after_netlist(self, name):
         self.base = self.nl.resolve_params()
         # Frozen HERE, before anything can move it.  The file's own values are
         # the design, and nothing -- a fit, a slider, the role grouping -- ever
@@ -292,7 +309,7 @@ class App:
         self.st = None
         self._pending = None
         self._rebuild_rows(STRUCT.independent(self.nl))
-        self.status.configure(text=f"{os.path.basename(path)}: "
+        self.status.configure(text=f"{name}: "
                                    f"{len(self.nl.elements)} elements, "
                                    f"{len(self.rows)} parameters "
                                    f"- working out which can be fitted...")
@@ -518,6 +535,10 @@ class App:
         self._draw_schematic()
 
     # ----------------------------------------------------------- calibration
+    def open_helical(self):
+        from .helicalwin import HelicalWindow
+        HelicalWindow(self.root, self)
+
     def open_cal(self):
         from .calwin import CalWindow
         CalWindow(self.root, self)

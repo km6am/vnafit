@@ -95,38 +95,65 @@ def _fmt(x):
     return f"{x:.12g}"
 
 
-def magnetic(f0s, ks, Qe1, Qen, Qu=None, L=330e-9, z0=50.0, title=None):
+def magnetic(f0s, ks, Qe1, Qen, Qu=None, L=330e-9, z0=50.0, title=None,
+             parametric=True):
     """Tapped, magnetically coupled parallel resonators -- the helical.
 
     `L` is a GAUGE, not a measurement: any L reproduces the same S-parameters
     exactly, provided C, the tap and Qu move with it.  It is an input here so
     the netlist reads like the physical object, not because the number is
     recoverable.  See the module docstring.
+
+    `parametric` (the default) writes the netlist in terms of `.param f01..f0n,
+    k1.., qe1, qen, qu` and derives every element from them.  Without it the
+    numbers are baked into the elements, and a netlist with no parameters is
+    one nothing downstream can do anything with: the identifiability card
+    refuses it, the fitter has nothing to turn loose, and the tuning readout
+    has no resonator to name.  Baked output stays available because it is
+    easier to read when all you want is the circuit.
     """
     n = len(f0s)
     if len(ks) != n - 1:
         raise ValueError(f"{n} resonators need {n-1} couplings, got {len(ks)}")
-    Ls = [L] * n
     lines = [title or f"{n}-pole magnetically coupled, tapped ports (synthesised)"]
-    lines.append(f".param lref={_fmt(L)}")
+
+    if parametric:
+        p = [f"lref={_fmt(L)}"]
+        p += [f"f0{i}={_fmt(f0)}" for i, f0 in enumerate(f0s, 1)]
+        p += [f"k{i}={_fmt(k)}" for i, k in enumerate(ks, 1)]
+        p += [f"qe1={_fmt(Qe1)}", f"qen={_fmt(Qen)}"]
+        if Qu:
+            p.append(f"qu={_fmt(Qu)}")
+        for chunk in [p[i:i + 4] for i in range(0, len(p), 4)]:
+            lines.append(".param " + "  ".join(chunk))
+        LV, ff = "{lref}", (lambda i: f"f0{i}")
+        cap = lambda i: "{1/(4*pi*pi*%s*%s*lref)}" % (ff(i), ff(i))
+        qq = "  Q={qu}" if Qu else ""
+        kv = lambda i: "{k%d}" % i
+        tap = lambda i, q: "{sqrt(%s/(2*pi*%s*lref*%s))}" % (_fmt(z0), ff(i), q)
+    else:
+        lines.append(f".param lref={_fmt(L)}")
+        LV = _fmt(L)
+        cap = lambda i: _fmt(_tank(f0s[i - 1], L)[0])
+        qq = f"  Q={_fmt(Qu)}" if Qu else ""
+        kv = lambda i: _fmt(ks[i - 1])
+        tap = lambda i, q: _fmt(tap_ratio(f0s[i - 1], L,
+                                          Qe1 if i == 1 else Qen, z0))
 
     lines.append(f".port 1 p1 0 Z0={_fmt(z0)}")
     lines.append(f".port 2 p2 0 Z0={_fmt(z0)}")
 
-    for i, (f0, Li) in enumerate(zip(f0s, Ls), 1):
-        C, _ = _tank(f0, Li)
-        q = f" Q={_fmt(Qu)}" if Qu else ""
-        lines.append(f"L{i} n{i} 0 {_fmt(Li)}{q}")
-        lines.append(f"C{i} n{i} 0 {_fmt(C)}")
+    for i in range(1, n + 1):
+        lines.append(f"L{i} n{i} 0 {LV}{qq}")
+        lines.append(f"C{i} n{i} 0 {cap(i)}")
 
     # k = M/sqrt(Li*Lj) is exactly the netlist's K coefficient, so the mapping
     # is the identity here -- for MAGNETIC coupling between parallel resonators.
-    for i, k in enumerate(ks, 1):
-        lines.append(f"K{i} L{i} L{i+1} {_fmt(k)}")
+    for i in range(1, n):
+        lines.append(f"K{i} L{i} L{i+1} {kv(i)}")
 
-    for port, idx, Qe in ((1, 1, Qe1), (2, n, Qen)):
-        nr = tap_ratio(f0s[idx - 1], Ls[idx - 1], Qe, z0)
-        lines.append(f"X{port} p{port} 0 n{idx} 0 n={_fmt(nr)}")
+    for port, idx, q in ((1, 1, "qe1"), (2, n, "qen")):
+        lines.append(f"X{port} p{port} 0 n{idx} 0 n={tap(idx, q)}")
 
     lines.append(_ac(f0s))
     return parse("\n".join(lines))

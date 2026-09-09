@@ -6,3 +6,6 @@ __pycache__/
 build/
 dist/
 .venv/
+
+# design notes kept locally, not published
+docs/plans/

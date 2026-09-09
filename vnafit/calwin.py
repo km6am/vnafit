@@ -71,6 +71,15 @@ class CalWindow(tk.Toplevel):
                    command=self.use_device).pack(side="left")
         ttk.Button(r, text="Read state",
                    command=self.read_device).pack(side="left", padx=6)
+        lr = ttk.Frame(dev)
+        lr.pack(fill="x", pady=(4, 0))
+        ttk.Label(lr, text="label").pack(side="left")
+        self.v_label = tk.StringVar()
+        ttk.Entry(lr, textvariable=self.v_label, width=34).pack(side="left", padx=4)
+        ttk.Button(lr, text="Remember", command=self.label_slot).pack(side="left")
+        ttk.Label(lr, foreground="#5f6873",
+                  text="kept on this computer, for the cal on the device"
+                  ).pack(side="left", padx=6)
         self.devlab = ttk.Label(dev, foreground="#5f6873", wraplength=560,
                                 justify="left", text="")
         self.devlab.pack(anchor="w", pady=(4, 0))
@@ -120,12 +129,25 @@ class CalWindow(tk.Toplevel):
                                 justify="left")
         self.status.pack(fill="x")
 
+        # The same fields whichever calibration they describe.  A local cal and
+        # a device slot need exactly the same things said about them, and the
+        # reference plane is the one that decides what every number means.
+        from .cal import FIXTURE_FIELDS
+        form = ttk.LabelFrame(self, text=" What this calibration is ", padding=8)
+        form.pack(fill="x", padx=8, pady=(4, 2))
+        self.v_fixture = {}
+        for i, (key, label, hint) in enumerate(FIXTURE_FIELDS):
+            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", pady=1)
+            v = tk.StringVar()
+            self.v_fixture[key] = v
+            ttk.Entry(form, textvariable=v, width=46).grid(row=i, column=1,
+                                                          padx=6, sticky="w")
+            ttk.Label(form, text=hint, foreground="#8a8a8a", wraplength=300,
+                      justify="left").grid(row=i, column=2, sticky="w")
+        self.v_notes = self.v_fixture["notes"]
+
         foot = ttk.Frame(self, padding=8)
         foot.pack(fill="x")
-        ttk.Label(foot, text="notes").pack(side="left")
-        self.v_notes = tk.StringVar()
-        ttk.Entry(foot, textvariable=self.v_notes, width=44).pack(
-            side="left", padx=6)
         self.savebtn = ttk.Button(foot, text="Save calibration...",
                                   command=self.save, state="disabled")
         self.savebtn.pack(side="right")
@@ -163,9 +185,53 @@ class CalWindow(tk.Toplevel):
                  f"correction is {'ON' if st['enabled'] else 'OFF'}"
                  + ("" if st["enabled"] else
                     "  -- sweeps are raw until you turn it on or use your own")
+                 + "\n" + self._slot_label(d, int(self.v_slot.get()))[0]
                  + "\n\nNote: the instrument does not report the span its "
                    "calibration was taken over, and does not say when it is "
                    "interpolating one.  That is what a local calibration is for.")
+
+    def _labels(self):
+        from .slots import SlotLabels
+        return SlotLabels()
+
+    def _slot_label(self, d, slot):
+        """(text, terms) -- reads the slot's contents to validate the label."""
+        try:
+            terms = d.cal_terms()
+        except Exception as e:                              # noqa: BLE001
+            return f"could not read the slot's contents ({e})", None
+        rec, state = self._labels().get(getattr(d, "_info", None), slot, terms)
+        if state == "labelled":
+            self.v_label.set(rec.get("label", ""))
+            from .cal import FIXTURE_FIELDS
+            bits = []
+            for key, label, _h in FIXTURE_FIELDS:
+                if rec.get(key):
+                    self.v_fixture[key].set(rec[key])
+                    bits.append(f"{label}: {rec[key]}")
+            return (f"label: {rec.get('label', '')}"
+                    + ("\n" + "; ".join(bits) if bits else "")), terms
+        self.v_label.set("")
+        if state == "changed":
+            return ("this slot has been RECALIBRATED since it was labelled, so "
+                    "the old label was dropped rather than shown next to a "
+                    "warning -- a label beside a caveat is still a label"), terms
+        return "no label for this slot yet", terms
+
+    def label_slot(self):
+        d = self._dev()
+        if d is None:
+            return
+        slot = int(self.v_slot.get())
+        try:
+            terms = d.cal_terms()
+        except Exception as e:                              # noqa: BLE001
+            messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
+            return
+        self._labels().set(getattr(d, "_info", None), slot, terms,
+                           self.v_label.get(),
+                           fixture={k: v.get() for k, v in self.v_fixture.items()})
+        self.read_device()
 
     def use_device(self):
         d = self._dev()
@@ -247,6 +313,7 @@ class CalWindow(tk.Toplevel):
                 self.captured["load"], self.captured.get("thru"),
                 self.captured.get("isolation"),
                 notes=self.v_notes.get(),
+                fixture={k: v.get() for k, v in self.v_fixture.items()},
                 instrument=getattr(getattr(self.app, "dev", None), "_info", None))
         except CalError as e:
             messagebox.showerror("calibration", str(e))

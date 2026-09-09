@@ -465,12 +465,29 @@ def cmd_cal(args):
                     print(f"  re-derivation FAILED: {e}")
         return 0
 
+    if args.what == "slots":
+        from .slots import SlotLabels
+        for rec in SlotLabels().known():
+            print(f"{rec['instrument']}  slot {rec['slot']}: "
+                  f"{rec.get('label', '(no label)')}")
+            for k in ("reference_plane", "cables", "kit", "temperature", "notes"):
+                if rec.get(k):
+                    print(f"    {k.replace('_', ' ')}: {rec[k]}")
+            print(f"    fingerprint {rec.get('hash', '?')}, noted "
+                  f"{rec.get('noted', '?')}")
+        print("\nA label is shown only while the slot still hashes the same. "
+              "Recalibrate it and the label is dropped, not warned about.")
+        return 0
+
     if args.what == "build":
         cal = Calibration.from_standards(
             TS.load(args.open), TS.load(args.short), TS.load(args.load),
             thru=TS.load(args.thru) if args.thru else None,
             isoln=TS.load(args.isolation) if args.isolation else None,
-            notes=args.notes or "")
+            notes=args.notes or "",
+            fixture={"reference_plane": args.reference_plane,
+                     "cables": args.cables, "kit": args.kit,
+                     "temperature": args.temperature})
         cal.save(args.out)
         print(cal.describe())
         print(f"\nwrote {args.out}")
@@ -697,6 +714,13 @@ def main(argv=None):
                    help="both ports terminated; without it EX is assumed zero")
     r.add_argument("--out", required=True)
     r.add_argument("--notes", help="what this cal is for, in your words")
+    r.add_argument("--reference-plane",
+                   help="where the calibration plane actually is -- the one "
+                        "thing that decides what every number means")
+    r.add_argument("--cables", help="type and length, both of them")
+    r.add_argument("--kit", help="which open/short/load you used")
+    r.add_argument("--temperature")
+    r = cs.add_parser("slots", help="labels remembered for the device's slots")
     r = cs.add_parser("from-slot", help="archive the instrument's own calibration")
     r.add_argument("slot", type=int)
     r.add_argument("--out", required=True)

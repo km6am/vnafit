@@ -48,6 +48,77 @@ TERMS = ("ED", "ES", "ER", "ET", "EX")
 IDEAL = {"open": 1.0 + 0j, "short": -1.0 + 0j, "load": 0.0 + 0j}
 
 
+# What a calibration is FOR, in fields rather than in one free-text blob.
+#
+# The reference plane is first because it is the most consequential thing anyone
+# can record about a calibration and the one the instrument can never know.  It
+# decides what the numbers mean: calibrate at the far end of the cables and the
+# DUT's own connectors are inside the plane; calibrate at the instrument's ports
+# and the cables are part of the DUT.  The same filter measures differently, and
+# nothing in the data says which was done.
+FIXTURE_FIELDS = (
+    ("reference_plane", "reference plane",
+     "where the calibration plane actually is -- at the ends of the cables, "
+     "at the instrument, at a fixture's launch"),
+    ("cables", "cables", "type and length, both of them"),
+    ("kit", "standards kit", "which open/short/load you used"),
+    ("thru", "thru",
+     "what the thru actually was.  A barrel or an adapter pair is NOT a "
+     "zero-length thru: its electrical length is subtracted from every DUT "
+     "you measure afterwards, invisibly, because it moves phase and leaves "
+     "magnitude alone"),
+    ("temperature", "temperature", "if it matters to you, and on a helical it does"),
+    ("notes", "notes", "anything else you will want in six months"),
+)
+FIXTURE_KEYS = tuple(k for k, _l, _h in FIXTURE_FIELDS)
+
+
+def _version():
+    try:
+        from importlib.metadata import version
+        return version("vnafit")
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _were_raw(standards):
+    """Were the standards swept with the instrument's own correction OFF?
+
+    They have to be.  Solving a calibration from sweeps the instrument has
+    already corrected is circular, and it does not fail loudly -- it produces
+    error terms near unity that look like an unusually good fixture.
+
+    Read from the Touchstone comments this project writes, so it is evidence
+    rather than an assumption.  A file from anywhere else says nothing either
+    way, and None is reported rather than a guess.
+    """
+    seen = set()
+    for ts in standards.values():
+        for c in getattr(ts, "comments", ()):
+            low = c.lower()
+            if "instrument correction" in low:
+                seen.add("off" if "off" in low else "on")
+    if not seen:
+        return None, "the standards carry no record of the instrument's " \
+                     "correction state"
+    if seen == {"off"}:
+        return True, "every standard is marked as swept raw"
+    return False, "at least one standard was swept WITH the instrument's own " \
+                  "correction on, which makes this calibration circular"
+
+
+def _settings(standards):
+    """Sweep settings worth keeping, scraped from the standards' comments."""
+    out = {}
+    for ts in standards.values():
+        for c in getattr(ts, "comments", ()):
+            for key, tag in (("if_bandwidth", "if bw"), ("averages", "average"),
+                             ("power", "power")):
+                if tag in c.lower() and key not in out:
+                    out[key] = c.strip()
+    return out
+
+
 class CalError(ValueError):
     """A calibration that cannot be built, or cannot be applied where asked."""
 
@@ -101,8 +172,21 @@ class Calibration:
                f"made:     {m.get('source', 'unknown')} on {m.get('created')}"]
         if m.get("instrument"):
             out.append(f"device:   {m['instrument']}")
-        if m.get("notes"):
-            out.append(f"notes:    {m['notes']}")
+        for key, label, _hint in FIXTURE_FIELDS:
+            if m.get(key):
+                out.append(f"{(label + ':'):<10}{m[key]}")
+        if not m.get("reference_plane"):
+            out.append("reference plane: NOT RECORDED -- without it nobody can "
+                       "say what these numbers are referred to")
+        raw = m.get("standards_raw")
+        if raw is False:
+            out.append("WARNING: " + m.get("standards_raw_evidence", ""))
+        elif raw is None and m.get("source") == "standards":
+            out.append("standards raw?  unknown -- "
+                       + m.get("standards_raw_evidence", ""))
+        for k in ("if_bandwidth", "averages", "power"):
+            if m.get(k):
+                out.append(f"sweep:    {m[k]}")
         if self.standards:
             out.append("standards embedded: " + ", ".join(sorted(self.standards)))
         else:
@@ -112,7 +196,7 @@ class Calibration:
     # ------------------------------------------------------------ construction
     @classmethod
     def from_standards(cls, open_, short_, load, thru=None, isoln=None,
-                       notes="", instrument=None, ideal=None):
+                       notes="", instrument=None, ideal=None, fixture=None):
         """Solve the three-term model, and the thru terms if given."""
         ideal = {**IDEAL, **(ideal or {})}
         f = np.asarray(open_.f, float)
@@ -146,11 +230,16 @@ class Calibration:
                                "frequencies -- was it actually connected?")
             terms["ET"] = ET
             std["thru"] = thru
-        return cls(f, terms, standards=std,
-                   meta={"source": "standards", "notes": notes,
-                         "instrument": instrument,
-                         "standards_ideal": {k: [v.real, v.imag]
-                                             for k, v in ideal.items()}})
+        raw, why = _were_raw(std)
+        meta = {"source": "standards", "notes": notes,
+                "instrument": instrument,
+                "vnafit": _version(),
+                "standards_raw": raw, "standards_raw_evidence": why,
+                "standards_ideal": {k: [v.real, v.imag] for k, v in ideal.items()}}
+        meta.update(_settings(std))
+        meta.update({k: v for k, v in (fixture or {}).items()
+                     if k in FIXTURE_KEYS and v})
+        return cls(f, terms, standards=std, meta=meta)
 
     @classmethod
     def from_instrument(cls, dev, slot=None, notes=""):

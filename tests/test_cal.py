@@ -335,3 +335,106 @@ def test_going_back_to_the_instrument_drops_ours_and_recalls_the_slot():
         assert app.cal_state()[0] == "cal: instrument"
     finally:
         root.destroy()
+
+
+# ----------------------------------------------------- labels for device slots
+def _slots(tmp_path):
+    from vnafit.slots import SlotLabels
+    return SlotLabels(str(tmp_path / "slots.json"))
+
+
+def _terms(seed=0.0):
+    f = np.linspace(1, 2, 32)
+    return {"ED": f + seed + 0j, "ES": f * 2j, "ER": f + 1}
+
+
+def test_a_slot_label_survives_a_reread_and_dies_on_a_recalibration(tmp_path):
+    """A label kept on this computer for a calibration kept on the device.  The
+    hash is what ties them: recalibrate the slot and the label is DROPPED, not
+    shown next to a warning -- a label beside a caveat is still a label, and it
+    is the wrong one."""
+    s = _slots(tmp_path)
+    s.set("H4 fw1.2", 2, _terms(), "2 m bench",
+          fixture={"reference_plane": "ends of the 1 m RG316 pair",
+                   "cables": "2x 1 m RG316"})
+    rec, state = s.get("H4 fw1.2", 2, _terms())
+    assert state == "labelled"
+    assert rec["label"] == "2 m bench"
+    assert rec["reference_plane"] == "ends of the 1 m RG316 pair"
+
+    rec, state = s.get("H4 fw1.2", 2, _terms(seed=1e-9))
+    assert state == "changed" and rec is None
+    assert s.get("H4 fw1.2", 2, _terms())[1] == "unlabelled", "it was not deleted"
+
+
+def test_a_different_instrument_does_not_inherit_the_label(tmp_path):
+    """The H4's info banner is identical on every unit running the same
+    firmware, so it cannot tell two apart.  The hash does not care: another
+    instrument's slot 2 holds different terms and simply will not match."""
+    s = _slots(tmp_path)
+    s.set("H4 fw1.2", 2, _terms(), "mine")
+    assert s.get("H4 fw1.2", 2, _terms(seed=0.5))[1] == "changed"
+
+
+def test_the_hash_is_stable_across_processes(tmp_path):
+    from vnafit.slots import slot_hash
+    assert slot_hash(_terms()) == slot_hash(_terms())
+    assert slot_hash(_terms()) != slot_hash(_terms(seed=1e-12))
+    assert slot_hash({"ED": _terms()["ED"]}) != slot_hash(_terms())
+
+
+def test_a_calibration_says_so_when_the_reference_plane_was_not_recorded():
+    """Without it nobody can say what the numbers are referred to, so its
+    absence is stated rather than left as a blank line."""
+    f = np.linspace(130e6, 165e6, 51)
+    (o, sh, l), kw = _standards(f)
+    plain = Calibration.from_standards(o, sh, l, **kw)
+    assert "NOT RECORDED" in plain.describe()
+
+    full = Calibration.from_standards(
+        o, sh, l, fixture={"reference_plane": "SMA at the cable ends",
+                           "cables": "2x 1 m RG316"}, **kw)
+    d = full.describe()
+    assert "SMA at the cable ends" in d and "RG316" in d
+    assert "NOT RECORDED" not in d
+
+
+def test_it_notices_standards_that_were_not_swept_raw():
+    """Solving a calibration from sweeps the instrument has already corrected
+    is circular, and it does not fail loudly -- it produces error terms near
+    unity that look like an unusually good fixture."""
+    f = np.linspace(130e6, 165e6, 51)
+
+    def std(g, comments):
+        S = np.zeros((51, 2, 2), complex)
+        S[:, 0, 0] = g
+        S[:, 1, 0] = 0.9
+        return Touchstone(f, S, comments=comments)
+
+    raw = ["instrument correction: OFF (raw)"]
+    on = ["instrument correction: as configured on the instrument"]
+
+    good = Calibration.from_standards(std(1., raw), std(-1., raw), std(0., raw))
+    assert good.meta["standards_raw"] is True
+    assert "WARNING" not in good.describe()
+
+    bad = Calibration.from_standards(std(1., on), std(-1., on), std(0., on))
+    assert bad.meta["standards_raw"] is False
+    assert "circular" in bad.describe()
+
+    # a file from anywhere else says nothing, and None is reported, not guessed
+    quiet = Calibration.from_standards(std(1., []), std(-1., []), std(0., []))
+    assert quiet.meta["standards_raw"] is None
+    assert "unknown" in quiet.describe()
+
+
+def test_the_thru_is_a_field_because_a_barrel_is_not_a_zero_length_thru():
+    """Its electrical length is subtracted from every DUT measured afterwards,
+    invisibly, because it moves phase and leaves magnitude alone."""
+    from vnafit.cal import FIXTURE_KEYS
+    assert "thru" in FIXTURE_KEYS
+    f = np.linspace(130e6, 165e6, 51)
+    (o, s, l), kw = _standards(f)
+    c = Calibration.from_standards(o, s, l, fixture={"thru": "SMA barrel, ~12 mm"},
+                                   **kw)
+    assert "SMA barrel" in c.describe()

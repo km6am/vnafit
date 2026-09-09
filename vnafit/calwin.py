@@ -34,6 +34,11 @@ STEPS = [
 
 
 class CalWindow(tk.Toplevel):
+    """The wizard.  All user-facing messages go through `_error` and `_info` so
+    a test can capture them: a test that trips the grid check with these calling
+    `messagebox` directly puts a modal dialog on the operator's screen and waits
+    for a click, which is what happened."""
+
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
@@ -44,6 +49,12 @@ class CalWindow(tk.Toplevel):
         self._refresh()
         if getattr(app, "dev", None) is not None:
             self.read_device()
+
+    def _error(self, msg):
+        self._error(msg)
+
+    def _info(self, msg):
+        self._info(msg)
 
     # ------------------------------------------------------------------ ui
     def _build(self):
@@ -169,7 +180,7 @@ class CalWindow(tk.Toplevel):
     def _dev(self):
         d = getattr(self.app, "dev", None)
         if d is None:
-            messagebox.showinfo("calibration", "Connect a VNA first.")
+            self._info("Connect a VNA first.")
         return d
 
     def read_device(self):
@@ -236,7 +247,7 @@ class CalWindow(tk.Toplevel):
         try:
             terms, _sw = d.cal_fingerprint()
         except Exception as e:                              # noqa: BLE001
-            messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
+            self._error(f"{type(e).__name__}: {e}")
             return
         self._labels().set(getattr(d, "_info", None), slot, terms,
                            self.v_label.get(),
@@ -250,7 +261,7 @@ class CalWindow(tk.Toplevel):
         try:
             self.app.use_device_cal(int(self.v_slot.get()))
         except Exception as e:                              # noqa: BLE001
-            messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
+            self._error(f"{type(e).__name__}: {e}")
             return
         self.read_device()
 
@@ -278,8 +289,7 @@ class CalWindow(tk.Toplevel):
     def capture(self, key):
         dev = getattr(self.app, "dev", None)
         if dev is None:
-            messagebox.showinfo("calibration",
-                                "Connect a VNA first -- a calibration has to be "
+            self._info("Connect a VNA first -- a calibration has to be "
                                 "measured, and a replay file cannot be one.")
             return
         try:
@@ -294,15 +304,17 @@ class CalWindow(tk.Toplevel):
                                              on_segment=progress if segs > 1
                                              else None)
         except Exception as e:                              # noqa: BLE001
-            messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
+            self._error(f"{type(e).__name__}: {e}")
             return
         if self.grid_f is not None and (len(f) != len(self.grid_f)
                                         or not np.allclose(f, self.grid_f)):
-            messagebox.showerror(
-                "calibration",
-                "That sweep came back on a different frequency grid from the "
-                "standards already captured.  Change the span and start again, "
-                "or re-capture the earlier ones.")
+            self._error(
+                f"That sweep came back on a different frequency grid "
+                f"({len(f)} points, {f[0]/1e6:.4f}-{f[-1]/1e6:.4f} MHz) from "
+                f"the standards already captured ({len(self.grid_f)} points, "
+                f"{self.grid_f[0]/1e6:.4f}-{self.grid_f[-1]/1e6:.4f} MHz).  "
+                f"Put the span, points and segments back, or clear what is "
+                f"captured and start again.")
             return
         self.grid_f = f
         S = np.zeros((len(f), 2, 2), complex)
@@ -346,7 +358,7 @@ class CalWindow(tk.Toplevel):
                 fixture={k: v.get() for k, v in self.v_fixture.items()},
                 instrument=getattr(getattr(self.app, "dev", None), "_info", None))
         except CalError as e:
-            messagebox.showerror("calibration", str(e))
+            self._error(str(e))
             return
         path = filedialog.asksaveasfilename(
             title="save calibration", defaultextension=".calz",
@@ -355,6 +367,5 @@ class CalWindow(tk.Toplevel):
             return
         cal.save(path)
         self.app.set_calibration(cal, path)
-        messagebox.showinfo("calibration",
-                            f"{os.path.basename(path)}\n\n{cal.describe()}")
+        self._info(f"{os.path.basename(path)}\n\n{cal.describe()}")
         self.destroy()

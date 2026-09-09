@@ -199,6 +199,7 @@ def test_the_calibration_window_builds():
     nothing caught it because no test had ever constructed the window --
     every other test in this file exercises the maths underneath it."""
     root, w = _calwin()
+    w._error = w._info = lambda *_a: None
     try:
         assert str(w.savebtn.cget("state")) == "disabled"
         assert "still needed" in w.status.cget("text")
@@ -211,6 +212,7 @@ def test_the_window_only_offers_to_save_once_the_three_required_are_in():
     """And says which of them are still missing, in the order it asks for them."""
     f = np.linspace(130e6, 165e6, 51)
     root, w = _calwin()
+    w._error = w._info = lambda *_a: None
     try:
         (o, s, l), _kw = _standards(f)
         w.captured["load"] = l
@@ -234,6 +236,7 @@ def test_the_window_refuses_standards_swept_on_different_grids():
     """Every standard has to be the same sweep, and the check has to happen at
     capture time -- discovering it at save time means doing them all again."""
     root, w = _calwin()
+    w._error = w._info = lambda *_a: None
     try:
         w.grid_f = np.linspace(130e6, 165e6, 401)
         assert len(w.grid_f) == 401
@@ -520,6 +523,8 @@ def test_the_window_can_capture_a_standard_in_several_passes():
     root.withdraw()
     dev = Dev()
     w = CalWindow(root, App(dev))
+    said = []
+    w._error = w._info = said.append          # never a modal in a test run
     try:
         w.v_start.set("130"); w.v_stop.set("170")
         w.v_points.set("401"); w.v_segments.set("4")
@@ -535,5 +540,7 @@ def test_the_window_can_capture_a_standard_in_several_passes():
         w.v_segments.set("2")
         w.capture("open")
         assert "open" not in w.captured, "a different grid was accepted"
+        assert said and "different frequency grid" in said[-1]
+        assert "801 points" in said[-1] and "1601 points" in said[-1], said[-1]
     finally:
         root.destroy()

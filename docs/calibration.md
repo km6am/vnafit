@@ -82,6 +82,14 @@ start MHz [130]  stop [170]  points [401]  segments [4]
 ```
 
 Measured on an H4: 401 points at 100 kHz took 5.1 s, 1601 at 25 kHz took 8.3 s.
+
+**Are the segment joins visible?**  Measured, and no.  Averaging twelve sweeps
+-- which cuts random noise about 3.5x and leaves a systematic step untouched --
+the three joins of a four-segment sweep came out at 0.2x, 1.8x and 1.0x the
+local point-to-point variation in |S11|, and 0.2x, 1.3x, 0.2x in |S21|.  The
+largest steps in the sweep were elsewhere entirely.  Any systematic join step is
+below 3.7e-5 in |S11|, about -89 dB.  Overlapping and blending segments would be
+machinery for a problem that has not been shown to exist.
 Every standard is then pinned to that grid — a second one captured with
 different settings is refused at capture time rather than at save time, when it
 would mean doing them all again. **Every capture is taken with the

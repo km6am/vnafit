@@ -168,9 +168,7 @@ comes back to **10⁻¹²** in both S11 and S21.
 ## Limits
 
 **Standards are assumed ideal** — open = +1, short = −1, load = 0. A real kit
-has a delay and a fringing capacitance. Assuming ideal and saying so beats
-quietly applying coefficients for a kit you may not own; a standards model
-belongs here later.
+has a delay and a fringing capacitance; a standards model belongs here later.
 
 **Leaving out the isolation sweep costs exactly the crosstalk term**, not a
 vague degradation. Measured: with EX = 10⁻⁴ unmeasured, S21 is wrong by

@@ -383,20 +383,16 @@ def test_the_hash_is_stable_across_processes(tmp_path):
     assert slot_hash({"ED": _terms()["ED"]}) != slot_hash(_terms())
 
 
-def test_a_calibration_says_so_when_the_reference_plane_was_not_recorded():
-    """Without it nobody can say what the numbers are referred to, so its
-    absence is stated rather than left as a blank line."""
+def test_setup_notes_are_optional_and_only_shown_when_filled_in():
     f = np.linspace(130e6, 165e6, 51)
     (o, sh, l), kw = _standards(f)
-    plain = Calibration.from_standards(o, sh, l, **kw)
-    assert "NOT RECORDED" in plain.describe()
+    plain = Calibration.from_standards(o, sh, l, **kw).describe()
+    assert "reference plane" not in plain, "an empty field should be silent"
 
     full = Calibration.from_standards(
         o, sh, l, fixture={"reference_plane": "SMA at the cable ends",
-                           "cables": "2x 1 m RG316"}, **kw)
-    d = full.describe()
-    assert "SMA at the cable ends" in d and "RG316" in d
-    assert "NOT RECORDED" not in d
+                           "cables": "2x 1 m RG316"}, **kw).describe()
+    assert "SMA at the cable ends" in full and "RG316" in full
 
 
 def test_it_notices_standards_that_were_not_swept_raw():
@@ -422,19 +418,19 @@ def test_it_notices_standards_that_were_not_swept_raw():
     assert bad.meta["standards_raw"] is False
     assert "circular" in bad.describe()
 
-    # a file from anywhere else says nothing, and None is reported, not guessed
+    # a file from anywhere else says nothing, and None is recorded rather than
+    # guessed -- but it is not worth a line of output
     quiet = Calibration.from_standards(std(1., []), std(-1., []), std(0., []))
     assert quiet.meta["standards_raw"] is None
-    assert "unknown" in quiet.describe()
+    assert "WARNING" not in quiet.describe()
 
 
-def test_the_thru_is_a_field_because_a_barrel_is_not_a_zero_length_thru():
-    """Its electrical length is subtracted from every DUT measured afterwards,
-    invisibly, because it moves phase and leaves magnitude alone."""
+def test_the_thru_gets_its_own_field():
+    """A barrel is not a zero-length thru, and its length ends up subtracted
+    from every DUT measured afterwards."""
     from vnafit.cal import FIXTURE_KEYS
     assert "thru" in FIXTURE_KEYS
     f = np.linspace(130e6, 165e6, 51)
     (o, s, l), kw = _standards(f)
-    c = Calibration.from_standards(o, s, l, fixture={"thru": "SMA barrel, ~12 mm"},
-                                   **kw)
+    c = Calibration.from_standards(o, s, l, fixture={"thru": "SMA barrel"}, **kw)
     assert "SMA barrel" in c.describe()

@@ -289,30 +289,71 @@ class NanoVNA:
             return False
 
     # ----------------------------------------------------------- calibration
-    # The firmware's own command spellings, in one place because they are the
-    # part of this file NOT verified against hardware.  Every method below
-    # reads the state back rather than trusting that a command was understood,
-    # so a wrong spelling surfaces as a clear error instead of a silent no-op.
+    # Read from the DiSlord NanoVNA-D source (cmd_cal in main.c), not from
+    # memory.  A first version of this guessed that bare `cal` replies "on" or
+    # "off"; it does not.  It prints the set bits of cal_status as words from
+    #
+    #     items[] = { "load","open","short","thru","isoln","Es","Er","Et","cal'ed" }
+    #
+    # so an uncalibrated instrument answers with an empty line, and a fully
+    # calibrated one with something like "load open short thru isoln Es Er Et
+    # cal'ed".  `cal on` sets CALSTAT_APPLY and `cal off` clears it, and that
+    # bit is the one printed as `cal'ed` -- which is why APPLIED below is that
+    # word and not any of the others: the rest mean a standard was COLLECTED,
+    # which is a different thing from the correction being in use.
     CAL_STATUS, CAL_ON, CAL_OFF, CAL_RECALL = "cal", "cal on", "cal off", "recall %d"
+    CAL_APPLIED = "cal'ed"
+    CAL_STANDARDS = ("load", "open", "short", "thru", "isoln")
+    CAL_TERMS = ("Es", "Er", "Et")
 
     def cal_status(self):
         """What the instrument says about its own correction.
 
-        Returns {"raw": [lines], "enabled": True/False/None}.  `enabled` is None
-        when the reply cannot be read -- which is the honest answer for firmware
-        this has not been checked against, and is deliberately not False.
+        Returns a dict with
+
+            enabled     True/False/None -- correction is being APPLIED
+            standards   which standards have been collected
+            terms       which error terms have been computed
+            raw         the reply, verbatim
+
+        `enabled` is None only when the instrument could not be asked.  An
+        EMPTY reply is a real answer -- uncalibrated -- and is reported as
+        False, not as unknown.
         """
         try:
             out = self.cmd(self.CAL_STATUS)
         except Exception as e:                              # noqa: BLE001
-            return {"raw": [], "enabled": None, "error": str(e)}
-        txt = " ".join(out).lower()
-        enabled = None
-        if "off" in txt and "on" not in txt:
-            enabled = False
-        elif "on" in txt and "off" not in txt:
-            enabled = True
-        return {"raw": out, "enabled": enabled}
+            return {"raw": [], "enabled": None, "standards": (), "terms": (),
+                    "error": str(e)}
+        words = " ".join(out).split()
+        return {"raw": out,
+                "enabled": self.CAL_APPLIED in words,
+                "standards": tuple(w for w in self.CAL_STANDARDS if w in words),
+                "terms": tuple(w for w in self.CAL_TERMS if w in words)}
+
+    def cal_terms(self):
+        """Download the instrument's calibration error terms.
+
+        `data 2..6` returns cal_data[0..4] -- the five terms ED, ES, ER, ET, EX.
+        Returns {name: complex array}.  There is no command to write them back:
+        the firmware exposes no upload, so a calibration can be read off the
+        instrument and archived, but only re-created by running the standards
+        again or by `recall`ing a slot.
+        """
+        names = ("ED", "ES", "ER", "ET", "EX")
+        out = {}
+        for i, name in enumerate(names):
+            rows = self.cmd(f"data {i + 2}")
+            v = []
+            for r in rows:
+                p = r.split()
+                if len(p) >= 2:
+                    try:
+                        v.append(float(p[0]) + 1j * float(p[1]))
+                    except ValueError:
+                        pass
+            out[name] = np.array(v)
+        return out
 
     def set_correction(self, on):
         """Turn the instrument's own error correction on or off.
@@ -324,13 +365,21 @@ class NanoVNA:
         """
         want = bool(on)
         self.cmd(self.CAL_ON if want else self.CAL_OFF)
-        got = self.cal_status()["enabled"]
+        st = self.cal_status()
+        got = st["enabled"]
         if got is None:
             raise IOError(
-                f"sent {self.CAL_ON if want else self.CAL_OFF!r} but this "
-                f"firmware's `{self.CAL_STATUS}` reply cannot be read, so "
-                f"whether correction is on is unknown.  Check `cal_status()"
-                f"['raw']` and set NanoVNA.CAL_* to this firmware's spelling.")
+                f"sent {self.CAL_ON if want else self.CAL_OFF!r} but the "
+                f"instrument could not be asked what state it is in: "
+                f"{st.get('error', 'no reply')}")
+        if got and not want:
+            pass
+        if got != want and want and not st["standards"]:
+            raise IOError(
+                "correction cannot be switched on: this instrument has no "
+                "calibration collected (bare `cal` returns nothing).  There is "
+                "no factory default to fall back on -- run the standards, or "
+                "`recall` a slot that has one.")
         if got != want:
             raise IOError(f"asked for correction {'on' if want else 'off'}, "
                           f"instrument reports {'on' if got else 'off'}")

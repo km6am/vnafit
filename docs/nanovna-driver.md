@@ -64,17 +64,47 @@ with NanoVNA() as dev:
 
 | | |
 |---|---|
-| `cal_status()` | `{"raw": [...], "enabled": True/False/None}`. `None` means the reply could not be read — the honest answer, and deliberately not `False`. |
-| `set_correction(on)` | switch it, **verified by reading the state back**. Raises if the firmware did not understand, rather than returning a cheerful `True`. |
-| `recall_cal(slot)` | load one of the instrument's stored calibrations. |
-| `uncorrected()` | context manager: correction off for the block, restored after. |
+| `cal_status()` | `{"enabled": bool, "standards": (...), "terms": (...), "raw": [...]}` |
+| `set_correction(on)` | switch it, **verified by reading the state back** |
+| `recall_cal(slot)` | load one of the instrument's stored calibrations (`recall 0..N`) |
+| `cal_terms()` | download the five error terms `ED, ES, ER, ET, EX` as complex arrays |
+| `uncorrected()` | context manager: correction off for the block, restored after |
 
-**The command spellings are the one part of this file not verified against
-hardware.** They are constants — `CAL_STATUS`, `CAL_ON`, `CAL_OFF`,
-`CAL_RECALL` — so a firmware that spells them differently needs one line
-changed, and every method reads the state back so a wrong spelling surfaces as
-an error instead of a silent no-op. Run `python vna.py --probe-cal` to see what
-your firmware actually exposes; it changes nothing.
+### What the firmware actually says
+
+Read from `cmd_cal` and `cmd_data` in the [NanoVNA-D
+source](https://github.com/DiSlord/NanoVNA-D), not from memory — a first
+version of this driver guessed and was wrong.
+
+A bare `cal` does **not** answer "on" or "off". It prints the set bits of
+`cal_status` as words from
+
+```c
+items[] = { "load","open","short","thru","isoln","Es","Er","Et","cal'ed" };
+```
+
+so an uncalibrated instrument replies with an empty line, and a calibrated one
+with `load open short thru isoln Es Er Et cal'ed`. The first five mean a
+standard was **collected**; `Es Er Et` mean error terms were **computed**; and
+`cal'ed` — the `CALSTAT_APPLY` bit, the one `cal on` sets and `cal off` clears
+— is the only one that means the correction is **in use**. `enabled` tracks
+that word and nothing else.
+
+An empty reply is a real answer, not an unknown one, so it reads as `False`.
+
+### There is no factory calibration
+
+The device starts uncalibrated. `cal reset` sets `cal_status = 0` and leaves
+nothing behind; `clearconfig 1234` erases the saved slots as well. So "return it
+to default" means **uncalibrated**, and `set_correction(True)` on an instrument
+with nothing collected raises and says so rather than appearing to succeed.
+
+### Downloading works; uploading does not
+
+`data 2` through `data 6` return `cal_data[0..4]` — the five error terms — so a
+calibration can be read off the instrument and archived. There is no command
+that writes them back. A calibration can therefore be *inspected and kept*, but
+only *re-created* by running the standards again or by `recall`ing a slot.
 
 **Restored the same way the display is.** An abandoned process cannot leave the
 instrument silently uncalibrated, which is a worse thing to walk away from than

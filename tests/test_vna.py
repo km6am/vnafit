@@ -221,10 +221,23 @@ def test_find_refuses_a_port_that_is_obviously_not_a_nanovna(monkeypatch):
 
 
 class FakeSerial:
-    """A serial port that answers `cal` the way DiSlord firmware does."""
+    """A serial port that answers `cal` the way DiSlord firmware really does.
 
-    def __init__(self, enabled=True, understands=True):
+    Not the way I first assumed.  `cmd_cal` with no arguments prints the SET
+    BITS of cal_status as words from
+
+        items[] = {"load","open","short","thru","isoln","Es","Er","Et","cal'ed"}
+
+    so an uncalibrated instrument answers with an empty line and there is no
+    "on" or "off" anywhere in the reply.  `cal on`/`cal off` set and clear
+    CALSTAT_APPLY, which is the bit printed as `cal'ed`.
+    """
+
+    FULL = "load open short thru isoln Es Er Et"
+
+    def __init__(self, enabled=True, calibrated=True, understands=True):
         self.enabled, self.understands = enabled, understands
+        self.calibrated = calibrated
         self.sent = []
         self._buf = b""
 
@@ -234,14 +247,16 @@ class FakeSerial:
     def write(self, b):
         s = b.decode().strip()
         self.sent.append(s)
+        body = ""
         if s == "cal" and self.understands:
-            body = "state: %s\r\n" % ("on" if self.enabled else "off")
+            words = (self.FULL if self.calibrated else "").split()
+            if self.enabled and self.calibrated:
+                words.append("cal'ed")
+            body = " ".join(words) + "\r\n"
         elif s == "cal on" and self.understands:
-            self.enabled = True; body = ""
+            self.enabled = True
         elif s == "cal off" and self.understands:
-            self.enabled = False; body = ""
-        else:
-            body = ""                       # firmware that does not know it
+            self.enabled = False
         self._buf = (s + "\r\n" + body + "ch> ").encode()
 
     def read(self, n=1):
@@ -274,24 +289,51 @@ def _drain(ser):
 
 
 def test_correction_can_be_switched_and_is_verified_by_reading_back():
-    d = _dev(enabled=True)
+    d = _dev(enabled=True, calibrated=True)
     assert d.cal_status()["enabled"] is True
     d.set_correction(False)
     assert d.cal_status()["enabled"] is False
     assert "cal off" in d.ser.sent
 
 
-def test_a_firmware_that_ignores_the_command_raises_rather_than_lying():
-    """Measuring uncorrected while believing you are corrected is worse than
-    not being able to switch, so an unreadable reply is an error."""
+def test_the_status_reply_is_parsed_the_way_the_firmware_writes_it():
+    """`cal` prints set status bits as words, not "on"/"off".
+
+    The first version of this driver looked for the literal words and would
+    have returned "unknown" against every real H4.  Read from cmd_cal in the
+    NanoVNA-D source.
+    """
+    d = _dev(enabled=True, calibrated=True)
+    st = d.cal_status()
+    assert st["enabled"] is True
+    assert st["standards"] == ("load", "open", "short", "thru", "isoln")
+    assert st["terms"] == ("Es", "Er", "Et")
+
+    d.ser.enabled = False
+    assert d.cal_status()["enabled"] is False
+
+
+def test_an_empty_reply_means_uncalibrated_not_unknown():
+    """An instrument with nothing collected answers with a blank line.  That is
+    a real answer and has to read as False -- reporting it as unknown would let
+    an application believe it might be corrected."""
+    d = _dev(calibrated=False)
+    st = d.cal_status()
+    assert st["enabled"] is False
+    assert st["standards"] == () and st["terms"] == ()
+
+
+def test_switching_on_without_a_calibration_says_why():
+    """There is no factory calibration to fall back on -- the device starts
+    uncalibrated and `cal reset` returns it there."""
     import pytest
-    d = _dev(understands=False)
-    with pytest.raises(IOError, match="cannot be read"):
-        d.set_correction(False)
+    d = _dev(calibrated=False)
+    with pytest.raises(IOError, match="no factory default"):
+        d.set_correction(True)
 
 
 def test_uncorrected_puts_the_correction_back():
-    d = _dev(enabled=True)
+    d = _dev(enabled=True, calibrated=True)
     with d.uncorrected():
         assert d.cal_status()["enabled"] is False
     assert d.cal_status()["enabled"] is True
@@ -300,7 +342,7 @@ def test_uncorrected_puts_the_correction_back():
 def test_close_restores_the_correction_even_if_the_block_is_abandoned():
     """An instrument left silently uncalibrated is worse to walk away from than
     a frozen screen: it looks completely normal."""
-    d = _dev(enabled=True)
+    d = _dev(enabled=True, calibrated=True)
     d.set_correction(False)
     d._cal_restore = True                 # as `uncorrected` would have set it
     d.resume = lambda: True

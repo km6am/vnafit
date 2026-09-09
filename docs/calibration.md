@@ -69,7 +69,22 @@ Isolation   both cables terminated, not joined          (optional)
 
 `Load` is first because it is the standard most often forgotten and the one
 whose absence is least visible afterwards: without it there is no directivity
-term, and a return loss is decorative. **Every capture is taken with the
+term, and a return loss is decorative.
+
+**Segments matter here.** The instrument sweeps 401 points in one pass, and a
+calibration can only correct at the resolution it was taken at. Set `segments`
+to stitch several passes into a finer grid — the window shows what you will get
+before you start:
+
+```
+start MHz [130]  stop [170]  points [401]  segments [4]
+1601 points across 40 MHz = 25.000 kHz  (4 passes, ~4x as long)
+```
+
+Measured on an H4: 401 points at 100 kHz took 5.1 s, 1601 at 25 kHz took 8.3 s.
+Every standard is then pinned to that grid — a second one captured with
+different settings is refused at capture time rather than at save time, when it
+would mean doing them all again. **Every capture is taken with the
 instrument's own correction switched off** and restored afterwards —
 calibrating through an existing calibration is circular, and the result looks
 perfectly fine.

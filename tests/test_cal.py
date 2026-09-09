@@ -481,3 +481,59 @@ def test_a_fingerprint_must_come_from_a_fixed_sweep():
     # and the naive read really does differ, which is why the above is needed
     d.cmd("sweep 90000000 220000000 101")
     assert slot_hash(d.cal_terms()) != slot_hash(t1)
+
+
+def test_the_window_can_capture_a_standard_in_several_passes():
+    """The instrument sweeps 401 points at once.  A calibration can only correct
+    at the resolution it was taken at, so being stuck at one pass caps every
+    local cal at the instrument's own grid -- and interpolating a coarse cal
+    onto a fine sweep is the thing this project keeps objecting to."""
+    import tkinter as tk
+    from vnafit.calwin import CalWindow
+
+    class Dev:
+        def __init__(self):
+            self.calls = []
+
+        def uncorrected(self):
+            import contextlib
+            return contextlib.nullcontext()
+
+        def scan_hires(self, start, stop, segments=1, points=401, **kw):
+            self.calls.append((start, stop, segments, points))
+            n = points if segments <= 1 else points + (points - 1) * (segments - 1)
+            f = np.linspace(start, stop, n)
+            if kw.get("on_segment"):
+                for i in range(segments):
+                    kw["on_segment"](i + 1, segments, f, f, f)
+            return f, np.zeros(n, complex), np.zeros(n, complex)
+
+    class App:
+        v_start = v_stop = None
+        def __init__(self, d): self.dev = d
+        def set_calibration(self, c, p=None): pass
+
+    try:
+        root = tk.Tk()
+    except tk.TclError:                                     # pragma: no cover
+        pytest.skip("no display")
+    root.withdraw()
+    dev = Dev()
+    w = CalWindow(root, App(dev))
+    try:
+        w.v_start.set("130"); w.v_stop.set("170")
+        w.v_points.set("401"); w.v_segments.set("4")
+        assert "1601 points" in w.seghint.cget("text")
+        assert "25.000 kHz" in w.seghint.cget("text")
+        assert "4 passes" in w.seghint.cget("text")
+
+        w.capture("load")
+        assert dev.calls == [(130e6, 170e6, 4, 401)]
+        assert len(w.captured["load"]) == 1601
+
+        # and every later standard is pinned to that same grid
+        w.v_segments.set("2")
+        w.capture("open")
+        assert "open" not in w.captured, "a different grid was accepted"
+    finally:
+        root.destroy()

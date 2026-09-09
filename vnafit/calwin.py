@@ -102,12 +102,23 @@ class CalWindow(tk.Toplevel):
         self.v_start = tk.StringVar(value=inherited("v_start", "130"))
         self.v_stop = tk.StringVar(value=inherited("v_stop", "165"))
         self.v_points = tk.StringVar(value="401")
+        self.v_segments = tk.StringVar(value="1")
         for lab, var, w in (("start MHz", self.v_start, 9),
-                            ("stop", self.v_stop, 9), ("points", self.v_points, 6)):
+                            ("stop", self.v_stop, 9), ("points", self.v_points, 6),
+                            ("segments", self.v_segments, 4)):
             ttk.Label(span, text=lab).pack(side="left", padx=(0, 3))
             ttk.Entry(span, textvariable=var, width=w).pack(side="left", padx=(0, 10))
         ttk.Label(span, foreground="#5f6873",
-                  text="every standard must use the same span").pack(side="left")
+                  text="same span for every standard").pack(side="left")
+        # The instrument sweeps 401 points at once.  Segments stitch several
+        # passes into one finer grid -- the resolution a calibration is taken
+        # at is the resolution it can correct at, and interpolating a coarse
+        # cal onto a fine sweep is the thing this project keeps objecting to.
+        self.seghint = ttk.Label(self, foreground="#5f6873", padding=(8, 0))
+        self.seghint.pack(anchor="w")
+        for v in (self.v_points, self.v_segments, self.v_start, self.v_stop):
+            v.trace_add("write", lambda *_a: self._seghint())
+        self._seghint()
 
         body = ttk.Frame(self, padding=8)
         body.pack(fill="both", expand=True)
@@ -247,9 +258,22 @@ class CalWindow(tk.Toplevel):
     def _cfg(self):
         try:
             return (float(self.v_start.get()) * 1e6, float(self.v_stop.get()) * 1e6,
-                    int(self.v_points.get()))
+                    int(self.v_points.get()), max(1, int(self.v_segments.get())))
         except ValueError:
-            raise CalError("start, stop and points must be numbers")
+            raise CalError("start, stop, points and segments must be numbers")
+
+    def _seghint(self):
+        try:
+            start, stop, points, segs = self._cfg()
+        except CalError:
+            self.seghint.configure(text="")
+            return
+        total = points if segs <= 1 else points + (points - 1) * (segs - 1)
+        step = (stop - start) / max(total - 1, 1)
+        self.seghint.configure(
+            text=f"{total} points across {(stop-start)/1e6:.4g} MHz "
+                 f"= {step/1e3:.3f} kHz"
+                 + ("" if segs <= 1 else f"  ({segs} passes, ~{segs}x as long)"))
 
     def capture(self, key):
         dev = getattr(self.app, "dev", None)
@@ -259,9 +283,16 @@ class CalWindow(tk.Toplevel):
                                 "measured, and a replay file cannot be one.")
             return
         try:
-            start, stop, points = self._cfg()
+            start, stop, points, segs = self._cfg()
+
+            def progress(i, n, *_rest):
+                self.status.configure(text=f"{key}: segment {i} of {n}...")
+                self.update_idletasks()
+
             with dev.uncorrected():
-                f, s11, s21 = dev.scan(start, stop, points)
+                f, s11, s21 = dev.scan_hires(start, stop, segs, points,
+                                             on_segment=progress if segs > 1
+                                             else None)
         except Exception as e:                              # noqa: BLE001
             messagebox.showerror("calibration", f"{type(e).__name__}: {e}")
             return
